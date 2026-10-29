@@ -25,11 +25,15 @@ describe("catalog", () => {
     expect(await res.json()).toEqual({ imported: 500, errors: [] });
     const again = await call("/v1/products/import", { method: "POST", body: "sku,name,retail_price\nSKU-0,Renamed item,150", token: a, type: "text/csv" });
     expect(again.status).toBe(200);
+    const dup = await call("/v1/products/import", { method: "POST", body: "sku,name,retail_price\nZ1,One,10\nZ1,Two,12", token: a, type: "text/csv" });
+    expect(dup.status).toBe(422);
+    expect(((await dup.json()) as { errors: { row: number }[] }).errors[0]!.row).toBe(3);
 
     const list = (await (await call("/v1/products?limit=500", { token: a })).json()) as unknown[];
     expect(list).toHaveLength(500);
     const [renamed] = (await (await call("/v1/products?q=SKU-0", { token: a })).json()) as { name: string; retail_price_cents: string }[];
-    expect(renamed).toMatchObject({ name: "Renamed item", retail_price_cents: "15000" });
+    expect(renamed).toMatchObject({ name: "Renamed item", retail_price_cents: "15000", barcode: "6161000000000", wholesale_price_cents: "9000", cost_cents: "7000" });
+    expect(renamed).toHaveProperty("category_name", "Dry Goods");
     const cats = (await (await call("/v1/categories", { token: a })).json()) as unknown[];
     expect(cats).toHaveLength(2);
     expect(await (await call("/v1/products", { token: b })).json()).toEqual([]);
@@ -51,6 +55,21 @@ describe("catalog", () => {
     expect(found[0]!.sku).toBe("MLK");
     expect(found[0]!.units[0]!.factor).toBe(24);
     expect((await call("/v1/products", { method: "POST", body: JSON.stringify(body), token: t })).status).toBe(409);
+    const clash = (barcode: string, units: unknown[] = []) =>
+      call("/v1/products", { method: "POST", body: JSON.stringify({ sku: `B-${barcode}-${units.length}`, name: "Bread", barcode, retailPriceCents: 6000, units }), token: t });
+    expect((await clash("999000")).status).toBe(409);
+    const blanks = [{ unit: "tray", factor: 10, priceCents: 1, barcode: "" }, { unit: "crate", factor: 20, priceCents: 2, barcode: " " }];
+    expect((await call("/v1/products", { method: "POST", body: JSON.stringify({ sku: "BLANK1", name: "Eggs", retailPriceCents: 10, units: blanks }), token: t })).status).toBe(201);
+    expect((await call("/v1/products", { method: "POST", body: JSON.stringify({ sku: "BLANK2", name: "Eggs 2", barcode: "", retailPriceCents: 10, units: blanks }), token: t })).status).toBe(201);
+    expect((await clash("123456", [{ unit: "tray", factor: 10, priceCents: 50000, barcode: "999000" }])).status).toBe(409);
+  });
+
+  it("rejects another business's category id", async () => {
+    const a = await register("shop-f");
+    const b = await register("shop-g");
+    const cat = (await (await call("/v1/categories", { method: "POST", body: JSON.stringify({ name: "Secret" }), token: a })).json()) as { id: string };
+    const res = await call("/v1/products", { method: "POST", body: JSON.stringify({ sku: "X", name: "Cross", categoryId: cat.id, retailPriceCents: 100 }), token: b });
+    expect(res.status).toBe(400);
   });
 });
 
@@ -70,5 +89,10 @@ describe("customers", () => {
     const cashier = ((await login.json()) as { accessToken: string }).accessToken;
     const upd = await call(`/v1/customers/${cust.id}`, { method: "PUT", body: JSON.stringify({ name: "Wanjiku Stores", creditLimitCents: 9900000 }), token: cashier });
     expect(upd.status).toBe(403);
+
+    await call("/v1/users", { method: "POST", body: JSON.stringify({ name: "Books", email: `acct-${run}@cat.ke`, role: "ACCOUNTANT", password: "account-pass-1" }), token: t });
+    const acct = ((await (await call("/v1/auth/login", { method: "POST", body: JSON.stringify({ email: `acct-${run}@cat.ke`, password: "account-pass-1" }) })).json()) as { accessToken: string }).accessToken;
+    expect((await call(`/v1/customers/${cust.id}`, { method: "PUT", body: JSON.stringify({ name: "Wanjiku Stores", creditLimitCents: 1 }), token: acct })).status).toBe(403);
+    expect((await call("/v1/customers", { method: "POST", body: JSON.stringify({ name: "New Credit", creditLimitCents: 100 }), token: acct })).status).toBe(403);
   });
 });

@@ -9,6 +9,13 @@ import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
 
 const MAX_IMPORT_ROWS = 5000;
+const REQUIRED_HEADERS = ["sku", "name", "retail_price"];
+/** CSV header -> column. On re-import only columns present in the file are updated. */
+const CSV_UPDATE_COLUMNS: Record<string, string> = {
+  name: "name", category: "category_id", barcode: "barcode", unit: "base_unit", tax_code: "tax_code",
+  retail_price: "retail_price_cents", wholesale_price: "wholesale_price_cents", wholesale_min_qty: "wholesale_min_qty",
+  cost: "cost_cents", reorder_level: "reorder_level",
+};
 
 const productRow = (p: ProductInput, businessId: string) => ({
   business_id: businessId,
@@ -97,18 +104,26 @@ export const catalogRoutes = new Hono<AppEnv>()
     });
     return c.body(null, 204);
   })
-  /** Body: raw CSV text. Upserts by SKU; all-or-nothing, returns per-row errors when any row is invalid. */
+  /** Body: raw CSV text (sku, name, retail_price required). Upserts by SKU, updating only supplied columns; all-or-nothing, returns per-row errors when any row is invalid. */
   .post("/products/import", requirePermission("catalog.manage"), async (c) => {
     const { sub, bid } = c.get("auth");
     const rows = parseCsv(await c.req.text());
     if (!rows.length) throw new HTTPException(400, { message: "CSV has no rows" });
     if (rows.length > MAX_IMPORT_ROWS) throw new HTTPException(400, { message: `Max ${MAX_IMPORT_ROWS} rows per import` });
+    const headers = Object.keys(rows[0]!);
+    const missing = REQUIRED_HEADERS.filter((h) => !headers.includes(h));
+    if (missing.length) throw new HTTPException(400, { message: `Missing columns: ${missing.join(", ")}` });
+    const updateSet = headers.filter((h) => h in CSV_UPDATE_COLUMNS).map((h) => `${CSV_UPDATE_COLUMNS[h]} = excluded.${CSV_UPDATE_COLUMNS[h]}`);
     const errors: { row: number; error: string }[] = [];
+    const seenSku = new Map<string, number>();
     const parsed = rows.flatMap((r, i) => {
       try {
         const { category, ...p } = csvRowToProduct(r);
         const res = productSchema.safeParse(p);
         if (!res.success) throw new Error(res.error.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; "));
+        const firstRow = seenSku.get(res.data.sku);
+        if (firstRow) throw new Error(`SKU ${res.data.sku} repeats row ${firstRow}`);
+        seenSku.set(res.data.sku, i + 2);
         return [{ category, product: res.data }];
       } catch (e) {
         errors.push({ row: i + 2, error: (e as Error).message });
@@ -128,11 +143,7 @@ export const catalogRoutes = new Hono<AppEnv>()
         productRow({ ...product, categoryId: category ? catIds.get(category.toLowerCase()) : undefined }, bid));
       for (let i = 0; i < values.length; i += 500) {
         await tx`INSERT INTO products ${tx(values.slice(i, i + 500), ...COLS)}
-          ON CONFLICT (business_id, sku) DO UPDATE SET
-            name = excluded.name, category_id = excluded.category_id, barcode = excluded.barcode, base_unit = excluded.base_unit,
-            tax_code = excluded.tax_code, cost_cents = excluded.cost_cents, retail_price_cents = excluded.retail_price_cents,
-            wholesale_price_cents = excluded.wholesale_price_cents, wholesale_min_qty = excluded.wholesale_min_qty,
-            reorder_level = excluded.reorder_level, is_active = true, updated_at = now()`;
+          ON CONFLICT (business_id, sku) DO UPDATE SET ${tx.unsafe([...updateSet, "is_active = true", "updated_at = now()"].join(", "))}`;
       }
       await audit(tx, { businessId: bid, userId: sub, action: "product.import", entity: "product", after: { rows: values.length } });
       return values.length;
