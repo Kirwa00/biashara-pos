@@ -2,8 +2,15 @@ import { Hono } from "hono";
 import { requireAuth, requirePermission } from "../auth";
 import { withTenant } from "../db";
 import type { AppEnv } from "../env";
+import type postgres from "postgres";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** One row per tracked product at or below its reorder level, stock summed across branches (no balance row = 0). */
+const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
+  FROM products p LEFT JOIN stock_balances b ON b.product_id = p.id
+  WHERE p.is_active AND p.track_stock AND p.reorder_level > 0
+  GROUP BY p.id HAVING coalesce(sum(b.on_hand), 0) <= p.reorder_level`;
 
 export const reportRoutes = new Hono<AppEnv>()
   .use(requireAuth)
@@ -23,18 +30,15 @@ export const reportRoutes = new Hono<AppEnv>()
       const [owed] = await tx`SELECT coalesce(sum(total_cents - paid_cents), 0) AS receivable_cents,
           coalesce(sum(total_cents - paid_cents) FILTER (WHERE due_date < (now() AT TIME ZONE 'Africa/Nairobi')::date), 0) AS overdue_cents
         FROM documents WHERE type IN ('INVOICE','SALE') AND status IN ('UNPAID','PARTIAL')`;
-      const [stock] = await tx`SELECT coalesce(round(sum(b.on_hand * b.avg_cost_cents)), 0) AS stock_value_cents,
-          count(*) FILTER (WHERE p.reorder_level > 0 AND b.on_hand <= p.reorder_level)::int AS low_stock
-        FROM products p LEFT JOIN stock_balances b ON b.product_id = p.id WHERE p.is_active AND p.track_stock`;
-      return { from, to, sales, returns, ...profit, received, ...owed, ...stock };
+      const [stock] = await tx`SELECT coalesce(round(sum(b.on_hand * b.avg_cost_cents)), 0) AS stock_value_cents
+        FROM products p JOIN stock_balances b ON b.product_id = p.id WHERE p.is_active AND p.track_stock`;
+      const [low] = await tx`SELECT count(*)::int AS low_stock FROM (${lowStock(tx)}) x`;
+      return { from, to, sales, returns, ...profit, received, ...owed, ...stock, ...low };
     }));
   })
   .get("/reports/alerts", requirePermission("reports.view"), async (c) =>
     c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => ({
-      low_stock: await tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
-        FROM products p LEFT JOIN stock_balances b ON b.product_id = p.id
-        WHERE p.is_active AND p.track_stock AND p.reorder_level > 0
-        GROUP BY p.id HAVING coalesce(sum(b.on_hand), 0) <= p.reorder_level ORDER BY coalesce(sum(b.on_hand), 0) - p.reorder_level LIMIT 20`,
+      low_stock: await tx`SELECT * FROM (${lowStock(tx)}) x ORDER BY x.on_hand - x.reorder_level LIMIT 20`,
       overdue: await tx`SELECT d.id, d.number, d.due_date, d.total_cents - d.paid_cents AS balance_cents, cu.name AS customer_name, cu.phone AS customer_phone
         FROM documents d LEFT JOIN customers cu ON cu.id = d.customer_id
         WHERE d.type IN ('INVOICE','SALE') AND d.status IN ('UNPAID','PARTIAL') AND d.due_date < (now() AT TIME ZONE 'Africa/Nairobi')::date

@@ -12,7 +12,7 @@ export function Dashboard() {
   const s = useLoad<Summary | null>("/reports/summary", null).data;
   const a = useLoad<Alerts | null>("/reports/alerts", null);
   const kes = (v?: string | number) => (v === undefined ? "—" : formatKes(Number(v)));
-  const received = s?.received.reduce((t, m) => t + Number(m.amount_cents), 0);
+  const received = s?.received.filter((m) => m.method === "CASH" || m.method === "MPESA").reduce((t, m) => t + Number(m.amount_cents), 0);
   const tiles = [
     { hint: "Sales today", label: "What have I sold?", value: kes(s?.sales.total_cents), to: "/sales" },
     { hint: "Debtors", label: "Who owes me money?", value: kes(s?.receivable_cents), to: "/sales" },
