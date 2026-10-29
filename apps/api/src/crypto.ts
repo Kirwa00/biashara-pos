@@ -32,3 +32,17 @@ export function randomToken(bytes = 32): string {
 export async function sha256(value: string): Promise<string> {
   return b64(await crypto.subtle.digest("SHA-256", enc.encode(value)));
 }
+
+const aesKey = async (secret: string) =>
+  crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)), "AES-GCM", false, ["encrypt", "decrypt"]);
+
+/** AES-256-GCM; output is base64(iv).base64(ciphertext). */
+export async function encryptSecret(secret: string, plain: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await aesKey(secret), new TextEncoder().encode(plain)));
+  return `${b64(iv)}.${b64(ct)}`;
+}
+export async function decryptSecret(secret: string, stored: string): Promise<string> {
+  const [iv, ct] = stored.split(".");
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(iv!) }, await aesKey(secret), unb64(ct!)));
+}

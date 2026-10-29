@@ -6,6 +6,8 @@ export interface Env {
   DATABASE_URL?: string;
   JWT_SECRET: string;
   APP_ORIGIN: string;
+  ENCRYPTION_KEY?: string;
+  PAYHERO_BASE_URL?: string;
 }
 
 export interface AuthClaims {

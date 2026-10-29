@@ -63,3 +63,59 @@ export const customerSchema = z.object({
   paymentTermsDays: z.number().int().min(0).max(365).default(0),
 });
 export type CustomerInput = z.infer<typeof customerSchema>;
+
+const stockQty = z.number().finite().refine((n) => Math.abs(n) <= 1e9 && Math.round(n * 1000) === n * 1000, "Max 3 decimals");
+export const openingStockSchema = z.object({
+  branchId: z.string().uuid().optional(),
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive"), unitCostCents: cents })).min(1).max(5000),
+});
+export const stockAdjustmentSchema = z.object({
+  branchId: z.string().uuid().optional(),
+  productId: z.string().uuid(),
+  quantity: stockQty.refine((n) => n !== 0, "Cannot be zero"),
+  reason: z.string().trim().min(3).max(200),
+});
+export const stockCountSchema = z.object({
+  branchId: z.string().uuid().optional(),
+  note: z.string().trim().max(200).optional(),
+  lines: z.array(z.object({ productId: z.string().uuid(), counted: stockQty.refine((n) => n >= 0, "Cannot be negative") })).min(1).max(5000),
+});
+
+const docLine = z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") });
+export const PAYMENT_METHODS = ["CASH", "MPESA", "CARD", "BANK"] as const;
+export const paymentInputSchema = z.object({
+  method: z.enum(PAYMENT_METHODS),
+  amountCents: z.number().int().positive(),
+  reference: z.string().trim().min(3).max(40).optional(),
+});
+export const documentSchema = z.object({
+  type: z.enum(["QUOTE", "INVOICE", "SALE"]),
+  branchId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+  dueDays: z.number().int().min(0).max(365).optional(),
+  idempotencyKey: z.string().min(8).max(64).optional(),
+  lines: z.array(docLine).min(1).max(500),
+  payments: z.array(paymentInputSchema).max(5).default([]),
+});
+export const supplierSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+  phone: z.string().trim().max(20).optional(),
+  email: z.string().trim().email().optional(),
+  kraPin: z.string().trim().toUpperCase().regex(/^[AP]\d{9}[A-Z]$/, "Invalid KRA PIN").optional(),
+});
+export const purchaseSchema = z.object({
+  supplierId: z.string().uuid(),
+  branchId: z.string().uuid().optional(),
+  supplierRef: z.string().trim().max(60).optional(),
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive"), unitCostCents: cents })).min(1).max(500),
+});
+export const paymentSettingsSchema = z.object({
+  username: z.string().trim().min(3).max(120),
+  password: z.string().min(3).max(200),
+  channelId: z.number().int().positive(),
+});
+export const stkPushSchema = z.object({
+  documentId: z.string().uuid(),
+  phone: z.string().trim().regex(/^(?:\+?254|0)[17]\d{8}$/, "Invalid phone"),
+  amountCents: z.number().int().positive(),
+});
