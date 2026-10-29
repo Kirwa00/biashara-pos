@@ -1,0 +1,13 @@
+name = "kenya-pos-api"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+APP_ORIGIN = "http://localhost:5173"
+
+# Production: bind Hyperdrive (query caching DISABLED — stock/payments must never read stale rows).
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<hyperdrive-id>"
+# Local dev: put DATABASE_URL and JWT_SECRET in .dev.vars (see .dev.vars.example).
