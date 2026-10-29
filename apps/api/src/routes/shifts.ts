@@ -20,7 +20,8 @@ async function summary(tx: Tx, shift: postgres.Row) {
   return { ...shift, by_method: byMethod, expected_cash_cents: expected, variance_cents: variance };
 }
 
-export const currentShiftId = (tx: Tx, userId: string) => tx`(SELECT id FROM shifts WHERE user_id = ${userId} AND status = 'OPEN')`;
+/** FOR SHARE blocks a concurrent close until the payment commits, so the Z totals include it. */
+export const currentShiftId = (tx: Tx, userId: string) => tx`(SELECT id FROM shifts WHERE user_id = ${userId} AND status = 'OPEN' FOR SHARE)`;
 
 export const shiftRoutes = new Hono<AppEnv>()
   .use(requireAuth)

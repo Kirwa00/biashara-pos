@@ -7,6 +7,7 @@ import { decryptSecret, encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
 import type { AppEnv, Env } from "../env";
 import { applyPayment } from "./documents";
+import { currentShiftId } from "./shifts";
 
 const base = (env: Env) => env.PAYHERO_BASE_URL ?? "https://backend.payhero.co.ke";
 const key = (env: Env) => {
@@ -47,8 +48,8 @@ export const paymentRoutes = new Hono<AppEnv>()
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${b.documentId} AND type <> 'QUOTE'`;
       if (!doc) throw new HTTPException(404, { message: "Invoice not found" });
       if (b.amountCents > Number(doc.total_cents) - Number(doc.paid_cents)) throw new HTTPException(422, { message: "Amount exceeds balance" });
-      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, status, phone, created_by)
-        VALUES (${bid}, ${doc.id}, 'MPESA', ${b.amountCents}, 'PENDING', ${toPhone254(b.phone)}, ${sub}) RETURNING id`;
+      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, status, phone, created_by, shift_id)
+        VALUES (${bid}, ${doc.id}, 'MPESA', ${b.amountCents}, 'PENDING', ${toPhone254(b.phone)}, ${sub}, ${currentShiftId(tx, sub)}) RETURNING id`;
       return { pay: pay!, s };
     });
     const password = await decryptSecret(key(c.env), s.payhero_password_enc);

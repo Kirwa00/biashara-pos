@@ -31,6 +31,12 @@ describe("shifts and returns", () => {
     expect(await json(call("POST", `/v1/documents/${sale.id}/return`, t, { reason: "Rest" }))).toMatchObject({ total_cents: "6000" });
     expect((await call("POST", `/v1/documents/${sale.id}/return`, t, { reason: "None left" })).status).toBe(409);
 
+    const gum = await json(call("POST", "/v1/products", t, { sku: "GUM", name: "Gum", retailPriceCents: 3, trackStock: false }));
+    const g = await json(call("POST", "/v1/documents", t, { type: "SALE", lines: [{ productId: gum.id, quantity: 4 }], payments: [{ method: "CASH", amountCents: 12 }] }));
+    let refunded = 0;
+    for (let i = 0; i < 4; i++) refunded += Number((await json(call("POST", `/v1/documents/${g.id}/return`, t, { lines: [{ productId: gum.id, quantity: 1 }], reason: "Split" }))).total_cents);
+    expect(refunded).toBe(12);
+
     const [row] = await json<any[]>(call("GET", "/v1/stock", t));
     expect(Number(row.on_hand)).toBe(9);
 
@@ -39,6 +45,6 @@ describe("shifts and returns", () => {
     expect(closed.by_method.map((m: any) => [m.method, Number(m.amount_cents)])).toEqual([["CASH", 0], ["MPESA", 6000]]);
 
     const rep = await json(call("GET", "/v1/reports/summary", t));
-    expect(rep.returns).toMatchObject({ count: 2, total_cents: "18000" });
+    expect(rep.returns).toMatchObject({ count: 6, total_cents: "18012" });
   });
 });

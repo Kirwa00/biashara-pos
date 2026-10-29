@@ -130,16 +130,23 @@ export const documentRoutes = new Hono<AppEnv>()
       if (!src) throw new HTTPException(404, { message: "Sale or invoice not found" });
       if (src.status !== "PAID") throw new HTTPException(409, { message: "Only fully paid documents can be refunded in this prototype" });
       const srcLines = await tx`SELECT l.*, p.track_stock,
-          l.quantity - coalesce((SELECT sum(r.quantity) FROM document_lines r WHERE r.source_line_id = l.id), 0) AS returnable
+          l.quantity - coalesce((SELECT sum(r.quantity) FROM document_lines r WHERE r.source_line_id = l.id), 0) AS returnable,
+          l.net_cents - coalesce((SELECT sum(r.net_cents) FROM document_lines r WHERE r.source_line_id = l.id), 0) AS net_left,
+          l.tax_cents - coalesce((SELECT sum(r.tax_cents) FROM document_lines r WHERE r.source_line_id = l.id), 0) AS tax_left
         FROM document_lines l JOIN products p ON p.id = l.product_id WHERE l.document_id = ${src.id} ORDER BY l.id`;
       const wanted = b.lines ?? srcLines.filter((l) => Number(l.returnable) > 0).map((l) => ({ productId: l.product_id as string, quantity: Number(l.returnable) }));
       if (!wanted.length) throw new HTTPException(409, { message: "Everything on this document has already been returned" });
       const picked = wanted.map((w) => {
         const l = srcLines.find((x) => x.product_id === w.productId && Number(x.returnable) >= w.quantity);
         if (!l) throw new HTTPException(409, { message: `Cannot return ${w.quantity} of product ${w.productId}` });
+        const last = Number(l.returnable) === w.quantity;
         l.returnable = Number(l.returnable) - w.quantity;
         const f = w.quantity / Number(l.quantity);
-        const net = Math.round(Number(l.net_cents) * f), tax = Math.round(Number(l.tax_cents) * f);
+        // Never refund more than is left on the line; the final return takes the exact residual.
+        const net = last ? Number(l.net_left) : Math.min(Math.round(Number(l.net_cents) * f), Number(l.net_left));
+        const tax = last ? Number(l.tax_left) : Math.min(Math.round(Number(l.tax_cents) * f), Number(l.tax_left));
+        l.net_left = Number(l.net_left) - net;
+        l.tax_left = Number(l.tax_left) - tax;
         return { l, quantity: w.quantity, net, tax, total: net + tax };
       });
       const total = picked.reduce((s, p) => s + p.total, 0);
