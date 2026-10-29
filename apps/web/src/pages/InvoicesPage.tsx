@@ -25,8 +25,11 @@ export function InvoicesPage() {
                 {d.type !== "QUOTE" && bal > 0 && <button className="text-primary" onClick={() => { const amt = prompt("Amount received (KES)"); if (amt) act(() => api(`/documents/${d.id}/payments`, { method: "POST", body: JSON.stringify({ method: "CASH", amountCents: toCents(amt) }) }), "Payment recorded"); }}>Pay</button>}
                 {d.type !== "QUOTE" && bal >= 100 && <button className="text-primary" onClick={() => {
                   const amt = prompt("M-Pesa amount in whole KES (any cents remainder needs another method)", String(Math.floor(bal / 100)));
-                  const phone = amt && prompt("M-Pesa phone 07…");
-                  if (phone) act(() => api("/payments/stk", { method: "POST", body: JSON.stringify({ documentId: d.id, phone, amountCents: Math.min(Math.floor(Number(amt)) * 100, bal - (bal % 100)) }) }), "STK push sent — waiting for customer");
+                  if (!amt) return;
+                  const kes = Number(amt.trim());
+                  if (!/^\d+$/.test(amt.trim()) || kes < 1 || kes * 100 > bal) { docs.setMsg(`Enter whole shillings from 1 to ${Math.floor(bal / 100)}`); return; }
+                  const phone = prompt("M-Pesa phone 07…");
+                  if (phone) act(() => api("/payments/stk", { method: "POST", body: JSON.stringify({ documentId: d.id, phone, amountCents: kes * 100 }) }), "STK push sent — waiting for customer");
                 }}>STK</button>}
               </td>
             </tr>); })}</tbody>
