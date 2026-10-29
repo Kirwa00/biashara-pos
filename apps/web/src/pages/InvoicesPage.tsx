@@ -23,7 +23,11 @@ export function InvoicesPage() {
               <td className="space-x-2 text-right">
                 {d.type === "QUOTE" && d.status === "OPEN" && <button className="text-primary" onClick={() => act(() => api(`/documents/${d.id}/convert`, { method: "POST" }), "Converted to invoice")}>Invoice</button>}
                 {d.type !== "QUOTE" && bal > 0 && <button className="text-primary" onClick={() => { const amt = prompt("Amount received (KES)"); if (amt) act(() => api(`/documents/${d.id}/payments`, { method: "POST", body: JSON.stringify({ method: "CASH", amountCents: toCents(amt) }) }), "Payment recorded"); }}>Pay</button>}
-                {d.type !== "QUOTE" && bal > 0 && <button className="text-primary" onClick={() => { const phone = prompt("M-Pesa phone 07…"); if (phone) act(() => api("/payments/stk", { method: "POST", body: JSON.stringify({ documentId: d.id, phone, amountCents: bal }) }), "STK push sent — waiting for customer"); }}>STK</button>}
+                {d.type !== "QUOTE" && bal >= 100 && <button className="text-primary" onClick={() => {
+                  const amt = prompt("M-Pesa amount in whole KES (any cents remainder needs another method)", String(Math.floor(bal / 100)));
+                  const phone = amt && prompt("M-Pesa phone 07…");
+                  if (phone) act(() => api("/payments/stk", { method: "POST", body: JSON.stringify({ documentId: d.id, phone, amountCents: Math.min(Math.floor(Number(amt)) * 100, bal - (bal % 100)) }) }), "STK push sent — waiting for customer");
+                }}>STK</button>}
               </td>
             </tr>); })}</tbody>
         </table>
