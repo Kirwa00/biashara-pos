@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: kenya_pos }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Create app role
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d kenya_pos -c "CREATE ROLE kpos_app LOGIN PASSWORD 'app';"
+      - run: npm run db:migrate
+        env: { MIGRATE_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/kenya_pos" }
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

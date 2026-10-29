@@ -1,0 +1,2 @@
+DATABASE_URL=postgres://kpos_app:app@localhost:5432/kenya_pos
+JWT_SECRET=change-me-to-32-random-bytes
