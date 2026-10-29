@@ -37,6 +37,9 @@ export async function postMovement(tx: Tx, m: Movement) {
 }
 
 export async function resolveBranch(tx: Tx, userId: string, branchId?: string): Promise<string> {
+  const [u] = await tx`SELECT role, branch_id FROM users WHERE id = ${userId}`;
+  if (branchId && u?.branch_id && u.branch_id !== branchId && !["OWNER", "MANAGER"].includes(u.role))
+    throw new HTTPException(403, { message: "You can only work in your own branch" });
   const [b] = branchId
     ? await tx`SELECT id FROM branches WHERE id = ${branchId}`
     : await tx`SELECT coalesce(u.branch_id, (SELECT id FROM branches ORDER BY (code = 'MAIN') DESC, created_at LIMIT 1)) AS id FROM users u WHERE u.id = ${userId}`;
@@ -81,6 +84,7 @@ export const stockRoutes = new Hono<AppEnv>()
     return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
       const branchId = await resolveBranch(tx, sub, body.branchId);
       const ids = body.lines.map((l) => l.productId);
+      for (const id of [...ids].sort()) await tx`SELECT pg_advisory_xact_lock(hashtext(${`opening:${branchId}:${id}`}))`;
       const [existing] = await tx`SELECT product_id FROM stock_movements WHERE branch_id = ${branchId} AND product_id IN ${tx(ids)} LIMIT 1`;
       if (existing) throw new HTTPException(409, { message: "Opening stock already recorded for a product; use an adjustment" });
       for (const l of body.lines)

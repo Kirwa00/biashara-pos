@@ -30,7 +30,10 @@ export async function applyPayment(tx: Tx, doc: postgres.Row, amountCents: numbe
   await tx`UPDATE documents SET paid_cents = ${paid}, status = ${statusFor(doc.type, Number(doc.total_cents), paid)} WHERE id = ${doc.id}`;
 }
 
-export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?: string) {
+type Fixed = { description: string; unit_price_cents: string; tax_code: string; net_cents: string; tax_cents: string; total_cents: string };
+
+/** `fixed` carries saved quotation lines so a converted invoice keeps the quoted prices. */
+export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?: string, fixed?: Fixed[]) {
   if (body.idempotencyKey) {
     const [dup] = await tx`SELECT * FROM documents WHERE idempotency_key = ${body.idempotencyKey}`;
     if (dup) return dup;
@@ -38,14 +41,16 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
   if (body.type === "QUOTE" && body.payments.length) throw new HTTPException(422, { message: "Quotations cannot take payments" });
   if (body.type === "INVOICE" && !body.customerId) throw new HTTPException(422, { message: "Invoices need a customer" });
   const branchId = await resolveBranch(tx, ctx.sub, body.branchId);
-  const [cust] = body.customerId ? await tx`SELECT * FROM customers WHERE id = ${body.customerId} AND is_active` : [];
+  const [cust] = body.customerId ? await tx`SELECT * FROM customers WHERE id = ${body.customerId} AND is_active FOR UPDATE` : [];
   if (body.customerId && !cust) throw new HTTPException(400, { message: "Unknown customer" });
 
   const ids = [...new Set(body.lines.map((l) => l.productId))];
-  const products = new Map((await tx`SELECT * FROM products WHERE is_active AND id IN ${tx(ids)}`).map((p) => [p.id as string, p]));
-  const lines = body.lines.map((l) => {
+  const products = new Map((await tx`SELECT * FROM products WHERE ${fixed ? tx`true` : tx`is_active`} AND id IN ${tx(ids)}`).map((p) => [p.id as string, p]));
+  const lines = body.lines.map((l, i) => {
     const p = products.get(l.productId);
     if (!p) throw new HTTPException(400, { message: `Unknown product ${l.productId}` });
+    const f = fixed?.[i];
+    if (f) return { ...l, p: { ...p, name: f.description, tax_code: f.tax_code } as typeof p, price: Number(f.unit_price_cents), t: { netCents: Number(f.net_cents), taxCents: Number(f.tax_cents), totalCents: Number(f.total_cents) } };
     const price = unitPrice({ retailPriceCents: Number(p.retail_price_cents), wholesalePriceCents: p.wholesale_price_cents == null ? null : Number(p.wholesale_price_cents), wholesaleMinQty: p.wholesale_min_qty == null ? null : Number(p.wholesale_min_qty) },
       l.quantity, cust?.price_tier ?? "RETAIL");
     return { ...l, p, price, t: computeLine({ unitPriceCents: price, quantity: l.quantity, taxCode: p.tax_code as TaxCode, priceIncludesTax: p.price_includes_tax }) };
@@ -110,8 +115,8 @@ export const documentRoutes = new Hono<AppEnv>()
       const [q] = await tx`SELECT * FROM documents WHERE id = ${c.req.param("id")} AND type = 'QUOTE' FOR UPDATE`;
       if (!q) throw new HTTPException(404, { message: "Quotation not found" });
       if (q.status !== "OPEN") throw new HTTPException(409, { message: "Quotation already converted" });
-      const lines = await tx`SELECT product_id, quantity FROM document_lines WHERE document_id = ${q.id} ORDER BY id`;
-      const inv = await createDocument(tx, { bid, sub }, { type: "INVOICE", branchId: q.branch_id, customerId: q.customer_id ?? undefined, lines: lines.map((l) => ({ productId: l.product_id, quantity: Number(l.quantity) })), payments: [] }, q.id);
+      const lines = await tx`SELECT product_id, quantity, description, unit_price_cents, tax_code, net_cents, tax_cents, total_cents FROM document_lines WHERE document_id = ${q.id} ORDER BY id`;
+      const inv = await createDocument(tx, { bid, sub }, { type: "INVOICE", branchId: q.branch_id, customerId: q.customer_id ?? undefined, lines: lines.map((l) => ({ productId: l.product_id, quantity: Number(l.quantity) })), payments: [] }, q.id, lines as unknown as Fixed[]);
       await tx`UPDATE documents SET status = 'CONVERTED' WHERE id = ${q.id}`;
       return inv;
     }), 201);

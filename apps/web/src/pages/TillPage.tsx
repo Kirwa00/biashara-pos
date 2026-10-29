@@ -1,4 +1,4 @@
-import { formatKes, toCents } from "@kpos/shared";
+import { computeLine, formatKes, toCents, unitPrice, type TaxCode } from "@kpos/shared";
 import { useState } from "react";
 import { api } from "../api";
 import { Card, Note, useLoad, type Product } from "./ui";
@@ -13,7 +13,9 @@ export function TillPage() {
   const [ref, setRef] = useState("");
   const [msg, setMsg] = useState("");
   const add = (p: Product) => setCart((c) => { const i = c.findIndex((l) => l.product.id === p.id); return i < 0 ? [...c, { product: p, quantity: 1 }] : c.map((l, j) => (j === i ? { ...l, quantity: l.quantity + 1 } : l)); });
-  const estimate = cart.reduce((s, l) => s + Number(l.product.retail_price_cents) * l.quantity, 0);
+  const lineTotal = ({ product: p, quantity }: Line) => computeLine({ quantity, taxCode: p.tax_code as TaxCode, priceIncludesTax: p.price_includes_tax,
+    unitPriceCents: unitPrice({ retailPriceCents: Number(p.retail_price_cents), wholesalePriceCents: p.wholesale_price_cents == null ? null : Number(p.wholesale_price_cents), wholesaleMinQty: p.wholesale_min_qty == null ? null : Number(p.wholesale_min_qty) }, quantity) }).totalCents;
+  const estimate = cart.reduce((s, l) => s + lineTotal(l), 0);
   async function pay(amount: string) {
     try {
       const doc = await api<{ number: number; total_cents: string }>("/documents", { method: "POST", body: JSON.stringify({

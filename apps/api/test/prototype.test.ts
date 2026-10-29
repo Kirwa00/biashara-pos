@@ -35,7 +35,7 @@ describe("prototype flows", () => {
     const inv = await json<{ id: string; total_cents: string; status: string }>(post(`/v1/documents/${quote.id}/convert`, {}, t));
     expect(inv).toMatchObject({ total_cents: "180000", status: "UNPAID" });
     expect((await post(`/v1/documents/${quote.id}/convert`, {}, t)).status).toBe(409);
-    expect((await post(`/v1/documents/${inv.id}/payments`, { method: "BANK", amountCents: 80000 }, t)).status).toBe(201);
+    expect((await post(`/v1/documents/${inv.id}/payments`, { method: "BANK", amountCents: 80000, reference: "EFT-001" }, t)).status).toBe(201);
 
     expect((await post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 100000 }, t)).status).toBe(409);
     expect((await send("PUT", "/v1/settings/payments", { username: "ph-user", password: "ph-secret", channelId: 123 }, t)).status).toBe(200);
@@ -44,7 +44,7 @@ describe("prototype flows", () => {
     expect(JSON.stringify(settings)).not.toContain("ph-secret");
 
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => new Response(JSON.stringify(String(url).includes("transaction-status")
-      ? { status: "SUCCESS", provider_reference: `QK${run}`, amount: 1000 } : { success: true, reference: "PH-REF-1" }), { status: 200 }));
+      ? { status: "SUCCESS", provider_reference: `QK${run}`, amount: 1000, reference: "PH-REF-1" } : { success: true, reference: "PH-REF-1" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const stk = await json<{ paymentId: string }>(post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 100000 }, t));
     const sent = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);

@@ -17,7 +17,7 @@ export const Card = ({ title, children, className = "" }: { title: string; child
   <section className={`rounded-xl border border-line bg-card p-5 ${className}`}><h2 className="mb-4 font-display text-lg font-bold">{title}</h2>{children}</section>
 );
 export const Note = ({ msg }: { msg: string }) => (msg ? <p className="mb-3 rounded-lg bg-surface p-3 text-sm">{msg}</p> : null);
-export type Product = { id: string; sku: string; name: string; retail_price_cents: string };
+export type Product = { id: string; sku: string; name: string; retail_price_cents: string; wholesale_price_cents: string | null; wholesale_min_qty: string | null; tax_code: string; price_includes_tax: boolean };
 export type Customer = { id: string; name: string };
 export const ProductSelect = ({ products, name = "productId" }: { products: Product[]; name?: string }) => (
   <select name={name} required className="input"><option value="">Product…</option>{products.map((p) => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}</select>

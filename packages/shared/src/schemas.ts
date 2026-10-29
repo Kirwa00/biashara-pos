@@ -87,7 +87,7 @@ export const paymentInputSchema = z.object({
   method: z.enum(PAYMENT_METHODS),
   amountCents: z.number().int().positive(),
   reference: z.string().trim().min(3).max(40).optional(),
-});
+}).refine((p) => p.method === "CASH" || !!p.reference, { message: "Enter the transaction code", path: ["reference"] });
 export const documentSchema = z.object({
   type: z.enum(["QUOTE", "INVOICE", "SALE"]),
   branchId: z.string().uuid().optional(),
@@ -117,5 +117,5 @@ export const paymentSettingsSchema = z.object({
 export const stkPushSchema = z.object({
   documentId: z.string().uuid(),
   phone: z.string().trim().regex(/^(?:\+?254|0)[17]\d{8}$/, "Invalid phone"),
-  amountCents: z.number().int().positive(),
+  amountCents: z.number().int().positive().refine((n) => n % 100 === 0, "M-Pesa takes whole shillings"),
 });

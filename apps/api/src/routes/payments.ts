@@ -55,7 +55,7 @@ export const paymentRoutes = new Hono<AppEnv>()
     const res = await fetch(`${base(c.env)}/api/v2/payments`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: basic(s.payhero_username, password) },
-      body: JSON.stringify({ amount: Math.ceil(b.amountCents / 100), phone_number: toPhone254(b.phone), channel_id: s.channel_id, provider: "m-pesa",
+      body: JSON.stringify({ amount: b.amountCents / 100, phone_number: toPhone254(b.phone), channel_id: s.channel_id, provider: "m-pesa",
         external_reference: pay.id, callback_url: `${new URL(c.req.url).origin}/v1/webhooks/payhero/${s.callback_token}` }),
     }).catch(() => null);
     const data = res?.ok ? ((await res.json()) as { reference?: string; CheckoutRequestID?: string }) : null;
@@ -86,9 +86,10 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
     const password = await decryptSecret(key(c.env), s!.payhero_password_enc);
     const res = await fetch(`${base(c.env)}/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`, { headers: { authorization: basic(s!.payhero_username, password) } }).catch(() => null);
     if (!res?.ok) return;
-    const st = (await res.json()) as { status?: string; provider_reference?: string; amount?: number };
+    const st = (await res.json()) as { status?: string; provider_reference?: string; amount?: number; reference?: string; external_reference?: string };
+    const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id;
     if (st.status === "SUCCESS") {
-      if (st.amount !== undefined && Math.round(st.amount * 100) < Number(pay.amount_cents)) return;
+      if (!sameTx || !st.provider_reference || st.amount === undefined || Math.round(st.amount * 100) !== Number(pay.amount_cents)) return;
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${pay.document_id} FOR UPDATE`;
       await applyPayment(tx, doc!, Number(pay.amount_cents));
       await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference ?? null} WHERE id = ${pay.id}`;
