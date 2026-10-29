@@ -28,7 +28,9 @@ export const createUserSchema = z.object({
 export const createBranchSchema = z.object({ name: z.string().min(2), code: z.string().min(2).max(12) });
 
 const cents = z.number().int().nonnegative();
-const optionalBarcode = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().min(4).max(40).optional());
+const blankToUndefined = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+const optionalBarcode = z.preprocess(blankToUndefined, z.string().trim().min(4).max(40).optional());
+const optionalUnitBarcode = z.preprocess(blankToUndefined, z.string().trim().optional());
 const qty = z.number().positive();
 export const TAX_CODE_VALUES = ["A", "B", "C", "D", "E"] as const;
 
@@ -46,7 +48,7 @@ export const productSchema = z.object({
   wholesaleMinQty: qty.optional(),
   reorderLevel: z.number().nonnegative().default(0),
   trackStock: z.boolean().default(true),
-  units: z.array(z.object({ unit: z.string().trim().min(1).max(12), factor: qty, priceCents: cents, barcode: optionalBarcode })).default([]),
+  units: z.array(z.object({ unit: z.string().trim().min(1).max(12), factor: qty, priceCents: cents, barcode: optionalUnitBarcode })).default([]),
 });
 export type ProductInput = z.infer<typeof productSchema>;
 

@@ -2,7 +2,8 @@
 -- Clean up data the old schema allowed so the constraints below can be created.
 UPDATE products SET barcode = NULL WHERE btrim(barcode) = '';
 UPDATE product_units SET barcode = NULL WHERE btrim(barcode) = '';
-UPDATE product_units u SET business_id = p.business_id FROM products p WHERE p.id = u.product_id AND u.business_id <> p.business_id;
+-- A unit pointing at another tenant's product is corrupt; drop it rather than expose it to that tenant.
+DELETE FROM product_units u USING products p WHERE p.id = u.product_id AND u.business_id <> p.business_id;
 UPDATE products p SET category_id = NULL FROM categories c WHERE c.id = p.category_id AND c.business_id <> p.business_id;
 UPDATE users u SET branch_id = NULL FROM branches b WHERE b.id = u.branch_id AND b.business_id <> u.business_id;
 UPDATE product_units u SET barcode = NULL WHERE EXISTS (
