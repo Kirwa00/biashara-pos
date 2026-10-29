@@ -28,4 +28,17 @@ export const reportRoutes = new Hono<AppEnv>()
         FROM products p LEFT JOIN stock_balances b ON b.product_id = p.id WHERE p.is_active AND p.track_stock`;
       return { from, to, sales, returns, ...profit, received, ...owed, ...stock };
     }));
-  });
+  })
+  .get("/reports/alerts", requirePermission("reports.view"), async (c) =>
+    c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => ({
+      low_stock: await tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
+        FROM products p LEFT JOIN stock_balances b ON b.product_id = p.id
+        WHERE p.is_active AND p.track_stock AND p.reorder_level > 0
+        GROUP BY p.id HAVING coalesce(sum(b.on_hand), 0) <= p.reorder_level ORDER BY coalesce(sum(b.on_hand), 0) - p.reorder_level LIMIT 20`,
+      overdue: await tx`SELECT d.id, d.number, d.due_date, d.total_cents - d.paid_cents AS balance_cents, cu.name AS customer_name, cu.phone AS customer_phone
+        FROM documents d LEFT JOIN customers cu ON cu.id = d.customer_id
+        WHERE d.type IN ('INVOICE','SALE') AND d.status IN ('UNPAID','PARTIAL') AND d.due_date < (now() AT TIME ZONE 'Africa/Nairobi')::date
+        ORDER BY d.due_date LIMIT 20`,
+      pending_adjustments: (await tx`SELECT count(*)::int AS n FROM stock_adjustments WHERE status = 'PENDING'`)[0]!.n,
+      open_shifts: (await tx`SELECT count(*)::int AS n FROM shifts WHERE status = 'OPEN'`)[0]!.n,
+    }))));

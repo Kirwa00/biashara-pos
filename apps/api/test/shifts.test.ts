@@ -46,5 +46,7 @@ describe("shifts and returns", () => {
 
     const rep = await json(call("GET", "/v1/reports/summary", t));
     expect(rep.returns).toMatchObject({ count: 6, total_cents: "18012" });
+    const alerts = await json(call("GET", "/v1/reports/alerts", t));
+    expect(alerts).toMatchObject({ low_stock: [], overdue: [], pending_adjustments: 0, open_shifts: 0 });
   });
 });
