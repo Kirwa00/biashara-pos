@@ -48,8 +48,8 @@ export const paymentRoutes = new Hono<AppEnv>()
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${b.documentId} AND type <> 'QUOTE'`;
       if (!doc) throw new HTTPException(404, { message: "Invoice not found" });
       if (b.amountCents > Number(doc.total_cents) - Number(doc.paid_cents)) throw new HTTPException(422, { message: "Amount exceeds balance" });
-      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, status, phone, created_by, shift_id)
-        VALUES (${bid}, ${doc.id}, 'MPESA', ${b.amountCents}, 'PENDING', ${toPhone254(b.phone)}, ${sub}, ${currentShiftId(tx, sub)}) RETURNING id`;
+      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, status, phone, created_by)
+        VALUES (${bid}, ${doc.id}, 'MPESA', ${b.amountCents}, 'PENDING', ${toPhone254(b.phone)}, ${sub}) RETURNING id`;
       return { pay: pay!, s };
     });
     const password = await decryptSecret(key(c.env), s.payhero_password_enc);
@@ -93,7 +93,8 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
       if (!sameTx || !st.provider_reference || st.amount === undefined || Math.round(st.amount * 100) !== Number(pay.amount_cents)) return;
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${pay.document_id} FOR UPDATE`;
       await applyPayment(tx, doc!, Number(pay.amount_cents));
-      await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference ?? null} WHERE id = ${pay.id}`;
+      // Shift is assigned at confirmation so a closed shift's Z totals never change; late confirmations land on the cashier's next open shift.
+      await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference ?? null}, shift_id = ${currentShiftId(tx, pay.created_by)} WHERE id = ${pay.id}`;
       await audit(tx, { businessId: row.bid as string, action: "payment.mpesa.confirmed", entity: "payment", entityId: pay.id, after: st });
     } else if (st.status === "FAILED") {
       await tx`UPDATE payments SET status = 'FAILED' WHERE id = ${pay.id}`;
