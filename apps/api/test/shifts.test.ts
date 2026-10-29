@@ -48,8 +48,7 @@ describe("shifts and returns", () => {
     expect(rep.returns).toMatchObject({ count: 6, total_cents: "18012" });
     const csv = await call("GET", "/v1/export/products", t);
     expect(csv.headers.get("content-type")).toContain("text/csv");
-    expect(await csv.text()).toMatch(/^id,.*
-.*MILK/s);
+    expect(await csv.text()).toMatch(/^id,.*\n.*MILK/s);
     expect((await call("GET", "/v1/export/users", t)).status).toBe(404);
     const alerts = await json(call("GET", "/v1/reports/alerts", t));
     expect(alerts).toMatchObject({ low_stock: [], overdue: [], pending_adjustments: 0, open_shifts: 0 });
