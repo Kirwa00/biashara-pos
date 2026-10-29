@@ -20,6 +20,17 @@ async function refresh(): Promise<boolean> {
   return true;
 }
 
+/** Authenticated file download (CSV exports). */
+export async function download(path: string, filename: string, retry = true): Promise<void> {
+  const token = session.get()?.accessToken;
+  const res = await fetch(`/v1${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401 && retry && (await refresh())) return download(path, filename, false);
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await res.blob()), download: filename });
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export async function api<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const token = session.get()?.accessToken;
   const res = await fetch(`/v1${path}`, {
