@@ -3,6 +3,8 @@ import { useState } from "react";
 import { api } from "../api";
 import { Card, Note, useLoad, type Product } from "./ui";
 
+type Shift = { id: string; opened_at: string; expected_cash_cents: number; by_method: { method: string; amount_cents: string }[] };
+
 type Line = { product: Product; quantity: number };
 
 export function TillPage() {
@@ -12,20 +14,38 @@ export function TillPage() {
   const [method, setMethod] = useState("CASH");
   const [ref, setRef] = useState("");
   const [msg, setMsg] = useState("");
+  const shift = useLoad<Shift | null>("/shifts/current", null);
+  const [lastId, setLastId] = useState("");
   const add = (p: Product) => setCart((c) => { const i = c.findIndex((l) => l.product.id === p.id); return i < 0 ? [...c, { product: p, quantity: 1 }] : c.map((l, j) => (j === i ? { ...l, quantity: l.quantity + 1 } : l)); });
   const lineTotal = ({ product: p, quantity }: Line) => computeLine({ quantity, taxCode: p.tax_code as TaxCode, priceIncludesTax: p.price_includes_tax,
     unitPriceCents: unitPrice({ retailPriceCents: Number(p.retail_price_cents), wholesalePriceCents: p.wholesale_price_cents == null ? null : Number(p.wholesale_price_cents), wholesaleMinQty: p.wholesale_min_qty == null ? null : Number(p.wholesale_min_qty) }, quantity) }).totalCents;
   const estimate = cart.reduce((s, l) => s + lineTotal(l), 0);
   async function pay(amount: string) {
     try {
-      const doc = await api<{ number: number; total_cents: string }>("/documents", { method: "POST", body: JSON.stringify({
+      const doc = await api<{ id: string; number: number; total_cents: string }>("/documents", { method: "POST", body: JSON.stringify({
         type: "SALE", idempotencyKey: crypto.randomUUID(), lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
         payments: [{ method, amountCents: amount ? toCents(amount) : estimate, reference: ref || undefined }] }) });
-      setMsg(`Sale #${doc.number} — ${formatKes(Number(doc.total_cents))}`); setCart([]); setRef("");
+      setMsg(`Sale #${doc.number} — ${formatKes(Number(doc.total_cents))}`); setLastId(doc.id); shift.reload(); setCart([]); setRef("");
     } catch (e) { setMsg((e as Error).message); }
   }
   return (
     <div className="grid gap-6 xl:grid-cols-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-card p-4 xl:col-span-3">
+        {shift.data ? (<>
+          <span className="flex-1 text-sm">Shift open since {new Date(shift.data.opened_at).toLocaleTimeString()} · cash expected in drawer <b className="num">{formatKes(shift.data.expected_cash_cents)}</b></span>
+          <button className="rounded-lg border border-line px-3 py-2" onClick={async () => {
+            const counted = prompt("Cash counted in drawer (KES)"); if (!counted) return;
+            try { const z = await api<{ expected_cash_cents: number; variance_cents: number }>(`/shifts/${shift.data!.id}/close`, { method: "POST", body: JSON.stringify({ countedCashCents: toCents(counted) }) });
+              setMsg(`Shift closed. Expected ${formatKes(z.expected_cash_cents)}, variance ${formatKes(z.variance_cents)}`); shift.reload(); } catch (e) { setMsg((e as Error).message); }
+          }}>Close shift (Z)</button>
+        </>) : (<>
+          <span className="flex-1 text-sm">No shift open. Open one so cash-up can balance.</span>
+          <button className="btn-primary" onClick={async () => {
+            const float = prompt("Opening float (KES)", "0"); if (float === null) return;
+            try { await api("/shifts/open", { method: "POST", body: JSON.stringify({ openingFloatCents: toCents(float || "0") }) }); shift.reload(); } catch (e) { setMsg((e as Error).message); }
+          }}>Open shift</button>
+        </>)}
+      </div>
       <Card title="Products" className="xl:col-span-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Scan barcode or search" autoFocus className="input mb-4" />
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{results.data.slice(0, 40).map((p) => (
@@ -33,6 +53,7 @@ export function TillPage() {
       </Card>
       <Card title="Cart">
         <Note msg={msg} />
+        {lastId && <a href={`/receipt/${lastId}`} target="_blank" rel="noreferrer" className="mb-3 block text-sm text-primary">Print last receipt</a>}
         {cart.map((l) => (
           <div key={l.product.id} className="flex items-center gap-2 border-b border-line py-2 text-sm">
             <span className="flex-1">{l.product.name}</span>

@@ -7,6 +7,7 @@ import { decryptSecret, encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
 import type { AppEnv, Env } from "../env";
 import { applyPayment } from "./documents";
+import { currentShiftId } from "./shifts";
 
 const base = (env: Env) => env.PAYHERO_BASE_URL ?? "https://backend.payhero.co.ke";
 const key = (env: Env) => {
@@ -92,7 +93,8 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
       if (!sameTx || !st.provider_reference || st.amount === undefined || Math.round(st.amount * 100) !== Number(pay.amount_cents)) return;
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${pay.document_id} FOR UPDATE`;
       await applyPayment(tx, doc!, Number(pay.amount_cents));
-      await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference ?? null} WHERE id = ${pay.id}`;
+      // Shift is assigned at confirmation so a closed shift's Z totals never change; late confirmations land on the cashier's next open shift.
+      await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference ?? null}, shift_id = ${currentShiftId(tx, pay.created_by)} WHERE id = ${pay.id}`;
       await audit(tx, { businessId: row.bid as string, action: "payment.mpesa.confirmed", entity: "payment", entityId: pay.id, after: st });
     } else if (st.status === "FAILED") {
       await tx`UPDATE payments SET status = 'FAILED' WHERE id = ${pay.id}`;

@@ -15,6 +15,7 @@ import { PaymentsSettingsPage } from "./pages/PaymentsSettingsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { TillPage } from "./pages/TillPage";
+import { ReceiptPage } from "./pages/ReceiptPage";
 
 const Protected = ({ children }: { children: React.ReactNode }) => (session.get() ? children : <Navigate to="/login" replace />);
 
@@ -24,6 +25,7 @@ createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
+        <Route path="/receipt/:id" element={<Protected><ReceiptPage /></Protected>} />
         <Route element={<Protected><AppShell /></Protected>}>
           <Route index element={<Dashboard />} />
           <Route path="products" element={<ProductsPage />} />
