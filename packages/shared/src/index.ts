@@ -3,3 +3,4 @@ export * from "./tax";
 export * from "./permissions";
 export * from "./schemas";
 export * from "./catalog";
+export * from "./stock";
