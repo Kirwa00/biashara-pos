@@ -58,6 +58,9 @@ describe("catalog", () => {
     const clash = (barcode: string, units: unknown[] = []) =>
       call("/v1/products", { method: "POST", body: JSON.stringify({ sku: `B-${barcode}-${units.length}`, name: "Bread", barcode, retailPriceCents: 6000, units }), token: t });
     expect((await clash("999000")).status).toBe(409);
+    const blanks = [{ unit: "tray", factor: 10, priceCents: 1, barcode: "" }, { unit: "crate", factor: 20, priceCents: 2, barcode: " " }];
+    expect((await call("/v1/products", { method: "POST", body: JSON.stringify({ sku: "BLANK1", name: "Eggs", retailPriceCents: 10, units: blanks }), token: t })).status).toBe(201);
+    expect((await call("/v1/products", { method: "POST", body: JSON.stringify({ sku: "BLANK2", name: "Eggs 2", barcode: "", retailPriceCents: 10, units: blanks }), token: t })).status).toBe(201);
     expect((await clash("123456", [{ unit: "tray", factor: 10, priceCents: 50000, barcode: "999000" }])).status).toBe(409);
   });
 
