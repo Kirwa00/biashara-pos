@@ -119,3 +119,12 @@ export const stkPushSchema = z.object({
   phone: z.string().trim().regex(/^(?:\+?254|0)[17]\d{8}$/, "Invalid phone"),
   amountCents: z.number().int().positive().refine((n) => n % 100 === 0, "M-Pesa takes whole shillings"),
 });
+
+export const openShiftSchema = z.object({ branchId: z.string().uuid().optional(), openingFloatCents: cents });
+export const closeShiftSchema = z.object({ countedCashCents: cents, note: z.string().trim().max(200).optional() });
+export const returnSchema = z.object({
+  lines: z.array(docLine).min(1).max(500).optional(),
+  method: z.enum(PAYMENT_METHODS).default("CASH"),
+  reference: z.string().trim().min(3).max(40).optional(),
+  reason: z.string().trim().min(3).max(200),
+});

@@ -3,7 +3,7 @@ import { api } from "../api";
 import { Card, formData, Note, ProductSelect, useLoad, type Customer, type Product } from "./ui";
 
 type Doc = { id: string; type: string; number: number; customer_name: string | null; status: string; total_cents: string; paid_cents: string; due_date: string | null };
-const PREFIX: Record<string, string> = { QUOTE: "QT", INVOICE: "INV", SALE: "RCT" };
+const PREFIX: Record<string, string> = { QUOTE: "QT", INVOICE: "INV", SALE: "RCT", CREDIT_NOTE: "CN" };
 
 export function InvoicesPage() {
   const docs = useLoad<Doc[]>("/documents", []);
@@ -19,8 +19,10 @@ export function InvoicesPage() {
           <tbody>{docs.data.map((d) => { const bal = Number(d.total_cents) - Number(d.paid_cents); return (
             <tr key={d.id} className="border-t border-line">
               <td className="py-3">{PREFIX[d.type]}-{String(d.number).padStart(4, "0")}</td><td>{d.customer_name ?? "Walk-in"}</td><td>{d.status}</td><td>{d.due_date?.slice(0, 10) ?? "—"}</td>
-              <td className="num text-right">{formatKes(Number(d.total_cents))}</td><td className="num text-right">{d.type === "QUOTE" ? "—" : formatKes(bal)}</td>
+              <td className="num text-right">{formatKes(Number(d.total_cents))}</td><td className="num text-right">{d.type === "QUOTE" || d.type === "CREDIT_NOTE" ? "—" : formatKes(bal)}</td>
               <td className="space-x-2 text-right">
+                <a className="text-primary" href={`/receipt/${d.id}`} target="_blank" rel="noreferrer">Print</a>
+                {d.type !== "QUOTE" && d.type !== "CREDIT_NOTE" && d.status === "PAID" && <button className="text-primary" onClick={() => { const reason = prompt("Return everything not yet returned — reason?"); if (reason) act(() => api(`/documents/${d.id}/return`, { method: "POST", body: JSON.stringify({ reason }) }), "Refunded — credit note created"); }}>Return</button>}
                 {d.type === "QUOTE" && d.status === "OPEN" && <button className="text-primary" onClick={() => act(() => api(`/documents/${d.id}/convert`, { method: "POST" }), "Converted to invoice")}>Invoice</button>}
                 {d.type !== "QUOTE" && bal > 0 && <button className="text-primary" onClick={() => { const amt = prompt("Amount received (KES)"); if (amt) act(() => api(`/documents/${d.id}/payments`, { method: "POST", body: JSON.stringify({ method: "CASH", amountCents: toCents(amt) }) }), "Payment recorded"); }}>Pay</button>}
                 {d.type !== "QUOTE" && bal >= 100 && <button className="text-primary" onClick={() => {

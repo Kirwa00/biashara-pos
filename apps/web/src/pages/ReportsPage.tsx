@@ -2,7 +2,7 @@ import { formatKes } from "@kpos/shared";
 import { useState } from "react";
 import { Card, Note, useLoad } from "./ui";
 
-type Summary = { from: string; to: string; sales: { count: number; total_cents: string; tax_cents: string }; gross_profit_cents: string;
+type Summary = { from: string; to: string; sales: { count: number; total_cents: string; tax_cents: string }; returns: { count: number; total_cents: string }; gross_profit_cents: string;
   received: { method: string; amount_cents: string }[]; receivable_cents: string; overdue_cents: string; stock_value_cents: string; low_stock: number };
 
 export function ReportsPage() {
@@ -21,6 +21,7 @@ export function ReportsPage() {
       {s && (<>
         <div className="grid gap-4 md:grid-cols-4">
           {tile(`Sales (${s.sales.count})`, formatKes(Number(s.sales.total_cents)))}
+          {tile(`Returns (${s.returns.count})`, formatKes(Number(s.returns.total_cents)))}
           {tile("Gross profit", formatKes(Number(s.gross_profit_cents)))}
           {tile("Owed to you", formatKes(Number(s.receivable_cents)))}
           {tile("Overdue", formatKes(Number(s.overdue_cents)))}

@@ -11,6 +11,7 @@ import { customerRoutes } from "./routes/customers";
 import { documentRoutes } from "./routes/documents";
 import { paymentRoutes, webhookRoutes } from "./routes/payments";
 import { reportRoutes } from "./routes/reports";
+import { shiftRoutes } from "./routes/shifts";
 import { stockRoutes } from "./routes/stock";
 import { supplierRoutes } from "./routes/suppliers";
 
@@ -41,7 +42,8 @@ export const app = new Hono<AppEnv>()
   .route("/v1", documentRoutes)
   .route("/v1", supplierRoutes)
   .route("/v1", paymentRoutes)
-  .route("/v1", reportRoutes);
+  .route("/v1", reportRoutes)
+  .route("/v1", shiftRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);

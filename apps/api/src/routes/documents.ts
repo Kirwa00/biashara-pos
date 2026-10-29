@@ -1,4 +1,4 @@
-import { can, computeLine, documentSchema, paymentInputSchema, unitPrice, type TaxCode } from "@kpos/shared";
+import { can, computeLine, documentSchema, paymentInputSchema, returnSchema, unitPrice, type TaxCode } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { requireAuth, requirePermission } from "../auth";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
+import { currentShiftId } from "./shifts";
 import { postMovement, resolveBranch } from "./stock";
 
 type Tx = postgres.TransactionSql;
@@ -81,7 +82,7 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
       VALUES (${ctx.bid}, ${doc!.id}, ${l.productId}, ${l.p.name}, ${l.quantity}, ${l.price}, ${l.p.tax_code}, ${l.t.netCents}, ${l.t.taxCents}, ${l.t.totalCents}, ${cost})`;
   }
   for (const p of body.payments)
-    await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by) VALUES (${ctx.bid}, ${doc!.id}, ${p.method}, ${p.amountCents}, ${p.reference ?? null}, ${ctx.sub})`;
+    await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id) VALUES (${ctx.bid}, ${doc!.id}, ${p.method}, ${p.amountCents}, ${p.reference ?? null}, ${ctx.sub}, ${currentShiftId(tx, ctx.sub)})`;
   await audit(tx, { businessId: ctx.bid, userId: ctx.sub, action: `document.create`, entity: body.type.toLowerCase(), entityId: doc!.id, after: { number, total, paid } });
   return doc!;
 }
@@ -121,6 +122,43 @@ export const documentRoutes = new Hono<AppEnv>()
       return inv;
     }), 201);
   })
+  .post("/documents/:id/return", requirePermission("sales.refund"), zValidator("json", returnSchema), async (c) => {
+    const { sub, bid } = c.get("auth");
+    const b = c.req.valid("json");
+    return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
+      const [src] = await tx`SELECT * FROM documents WHERE id = ${c.req.param("id")} AND type IN ('SALE','INVOICE') FOR UPDATE`;
+      if (!src) throw new HTTPException(404, { message: "Sale or invoice not found" });
+      if (src.status !== "PAID") throw new HTTPException(409, { message: "Only fully paid documents can be refunded in this prototype" });
+      const srcLines = await tx`SELECT l.*, p.track_stock,
+          l.quantity - coalesce((SELECT sum(r.quantity) FROM document_lines r WHERE r.source_line_id = l.id), 0) AS returnable
+        FROM document_lines l JOIN products p ON p.id = l.product_id WHERE l.document_id = ${src.id} ORDER BY l.id`;
+      const wanted = b.lines ?? srcLines.filter((l) => Number(l.returnable) > 0).map((l) => ({ productId: l.product_id as string, quantity: Number(l.returnable) }));
+      if (!wanted.length) throw new HTTPException(409, { message: "Everything on this document has already been returned" });
+      const picked = wanted.map((w) => {
+        const l = srcLines.find((x) => x.product_id === w.productId && Number(x.returnable) >= w.quantity);
+        if (!l) throw new HTTPException(409, { message: `Cannot return ${w.quantity} of product ${w.productId}` });
+        l.returnable = Number(l.returnable) - w.quantity;
+        const f = w.quantity / Number(l.quantity);
+        const net = Math.round(Number(l.net_cents) * f), tax = Math.round(Number(l.tax_cents) * f);
+        return { l, quantity: w.quantity, net, tax, total: net + tax };
+      });
+      const total = picked.reduce((s, p) => s + p.total, 0);
+      const number = await nextNumber(tx, bid, "CREDIT_NOTE");
+      const [cn] = await tx`INSERT INTO documents (business_id, branch_id, type, number, customer_id, status, net_cents, tax_cents, total_cents, paid_cents, source_id, created_by)
+        VALUES (${bid}, ${src.branch_id}, 'CREDIT_NOTE', ${number}, ${src.customer_id}, 'REFUNDED', ${picked.reduce((s, p) => s + p.net, 0)},
+          ${picked.reduce((s, p) => s + p.tax, 0)}, ${total}, ${total}, ${src.id}, ${sub}) RETURNING *`;
+      for (const p of picked) {
+        if (p.l.track_stock)
+          await postMovement(tx, { businessId: bid, branchId: src.branch_id, productId: p.l.product_id, type: "RETURN", quantity: p.quantity, unitCostCents: Number(p.l.unit_cost_cents), reason: b.reason, refType: "document", refId: cn!.id, userId: sub });
+        await tx`INSERT INTO document_lines (business_id, document_id, product_id, description, quantity, unit_price_cents, tax_code, net_cents, tax_cents, total_cents, unit_cost_cents, source_line_id)
+          VALUES (${bid}, ${cn!.id}, ${p.l.product_id}, ${p.l.description}, ${p.quantity}, ${p.l.unit_price_cents}, ${p.l.tax_code}, ${p.net}, ${p.tax}, ${p.total}, ${p.l.unit_cost_cents}, ${p.l.id})`;
+      }
+      await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id, direction)
+        VALUES (${bid}, ${cn!.id}, ${b.method}, ${total}, ${b.reference ?? null}, ${sub}, ${currentShiftId(tx, sub)}, -1)`;
+      await audit(tx, { businessId: bid, userId: sub, action: "document.return", entity: "credit_note", entityId: cn!.id, after: { source: src.id, total, reason: b.reason } });
+      return cn;
+    }), 201);
+  })
   .post("/documents/:id/payments", requirePermission("payments.record"), zValidator("json", paymentInputSchema), async (c) => {
     const { sub, bid } = c.get("auth");
     const p = c.req.valid("json");
@@ -128,7 +166,7 @@ export const documentRoutes = new Hono<AppEnv>()
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${c.req.param("id")} AND type <> 'QUOTE' FOR UPDATE`;
       if (!doc) throw new HTTPException(404, { message: "Invoice not found" });
       await applyPayment(tx, doc, p.amountCents);
-      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by) VALUES (${bid}, ${doc.id}, ${p.method}, ${p.amountCents}, ${p.reference ?? null}, ${sub}) RETURNING *`;
+      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id) VALUES (${bid}, ${doc.id}, ${p.method}, ${p.amountCents}, ${p.reference ?? null}, ${sub}, ${currentShiftId(tx, sub)}) RETURNING *`;
       await audit(tx, { businessId: bid, userId: sub, action: "payment.record", entity: "payment", entityId: pay!.id, after: p });
       return pay;
     }), 201);
