@@ -34,7 +34,9 @@ export const app = new Hono<AppEnv>()
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
-  if ((err as { code?: string }).code === "23505") return c.json({ error: "Already exists" }, 409);
+  const code = (err as { code?: string }).code;
+  if (code === "23505") return c.json({ error: "Already exists" }, 409);
+  if (code === "23503") return c.json({ error: "Invalid reference" }, 400);
   console.error(err);
   return c.json({ error: "Something went wrong" }, 500);
 });

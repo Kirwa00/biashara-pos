@@ -1,4 +1,4 @@
-import { customerSchema, type CustomerInput } from "@kpos/shared";
+import { can, customerSchema, type CustomerInput } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -11,6 +11,8 @@ const row = (b: CustomerInput) => ({
   price_tier: b.priceTier, credit_limit_cents: b.creditLimitCents, payment_terms_days: b.paymentTermsDays,
 });
 const COLS = Object.keys(row(customerSchema.parse({ name: "xx" }))) as (keyof ReturnType<typeof row>)[];
+
+const CREDIT_FORBIDDEN = new HTTPException(403, { message: "Only a manager can set credit limits" });
 
 export const customerRoutes = new Hono<AppEnv>()
   .use(requireAuth)
@@ -27,8 +29,9 @@ export const customerRoutes = new Hono<AppEnv>()
     return c.json(cust);
   })
   .post("/customers", requirePermission("customers.manage"), zValidator("json", customerSchema), async (c) => {
-    const { sub, bid } = c.get("auth");
+    const { sub, bid, role } = c.get("auth");
     const body = c.req.valid("json");
+    if (body.creditLimitCents !== 0 && !can(role, "customers.credit")) throw CREDIT_FORBIDDEN;
     const cust = await withTenant(c.get("sql"), bid, async (tx) => {
       const [r] = await tx`INSERT INTO customers ${tx({ ...row(body), business_id: bid }, ...COLS, "business_id")} RETURNING *`;
       await audit(tx, { businessId: bid, userId: sub, action: "customer.create", entity: "customer", entityId: r!.id, after: body });
@@ -43,8 +46,7 @@ export const customerRoutes = new Hono<AppEnv>()
     const cust = await withTenant(c.get("sql"), bid, async (tx) => {
       const [before] = await tx`SELECT * FROM customers WHERE id = ${id} FOR UPDATE`;
       if (!before) throw new HTTPException(404, { message: "Customer not found" });
-      if (role === "CASHIER" && Number(before.credit_limit_cents) !== body.creditLimitCents)
-        throw new HTTPException(403, { message: "Only a manager can change credit limits" });
+      if (Number(before.credit_limit_cents) !== body.creditLimitCents && !can(role, "customers.credit")) throw CREDIT_FORBIDDEN;
       const [r] = await tx`UPDATE customers SET ${tx(row(body), ...COLS)}, updated_at = now() WHERE id = ${id} RETURNING *`;
       await audit(tx, { businessId: bid, userId: sub, action: "customer.update", entity: "customer", entityId: id, before, after: body });
       return r;
