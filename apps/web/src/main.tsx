@@ -5,6 +5,8 @@ import "./index.css";
 import { session } from "./api";
 import { AppShell } from "./pages/AppShell";
 import { AuthPage } from "./pages/AuthPage";
+import { CustomersPage } from "./pages/CustomersPage";
+import { ProductsPage } from "./pages/ProductsPage";
 import { Dashboard } from "./pages/Dashboard";
 import { TeamPage } from "./pages/TeamPage";
 
@@ -18,6 +20,8 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/register" element={<AuthPage mode="register" />} />
         <Route element={<Protected><AppShell /></Protected>}>
           <Route index element={<Dashboard />} />
+          <Route path="products" element={<ProductsPage />} />
+          <Route path="customers" element={<CustomersPage />} />
           <Route path="team" element={<TeamPage />} />
         </Route>
       </Routes>

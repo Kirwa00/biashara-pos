@@ -6,6 +6,8 @@ import { createSql } from "./db";
 import type { AppEnv } from "./env";
 import { authRoutes } from "./routes/auth";
 import { businessRoutes } from "./routes/business";
+import { catalogRoutes } from "./routes/catalog";
+import { customerRoutes } from "./routes/customers";
 
 export const app = new Hono<AppEnv>()
   .use(secureHeaders())
@@ -26,7 +28,9 @@ export const app = new Hono<AppEnv>()
     }
   })
   .route("/v1/auth", authRoutes)
-  .route("/v1", businessRoutes);
+  .route("/v1", businessRoutes)
+  .route("/v1", catalogRoutes)
+  .route("/v1", customerRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);

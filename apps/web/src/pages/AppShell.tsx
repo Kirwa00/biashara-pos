@@ -5,9 +5,11 @@ import { api, session } from "../api";
 type Me = { user: { name: string; role: string }; business: { name: string } };
 const NAV = [
   { to: "/", label: "Dashboard" },
+  { to: "/products", label: "Products" },
+  { to: "/customers", label: "Customers" },
   { to: "/team", label: "Team & branches" },
 ];
-const SOON = ["POS Till", "Sales & Invoices", "Customers", "Inventory", "Suppliers", "Reports", "eTIMS", "Payments"];
+const SOON = ["POS Till", "Sales & Invoices", "Inventory", "Suppliers", "Reports", "eTIMS", "Payments"];
 
 export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
