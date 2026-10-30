@@ -63,4 +63,32 @@ describe("prototype flows", () => {
     expect(rep.stock_value_cents).toBe("120000");
     expect(rep.received.map((r) => r.method)).toEqual(["BANK", "CASH", "MPESA"]);
   });
+
+  it("auto-confirms hand-entered M-Pesa codes only when PayHero reports that code for the exact amount", async () => {
+    const t = (await json<{ accessToken: string }>(post("/v1/auth/register", { businessName: "codes", ownerName: "Owner", email: `codes-${run}@p.ke`, phone: "0712345678", password: "correct-horse-1" }, ""))).accessToken;
+    const p = await json<{ id: string }>(post("/v1/products", { sku: "SALT", name: "Salt", retailPriceCents: 5000, trackStock: false }, t));
+    const sale = (code: string) => post("/v1/documents", { type: "SALE", lines: [{ productId: p.id, quantity: 1 }], payments: [{ method: "MPESA", amountCents: 5000, reference: code }] }, t);
+    expect((await sale("nopayhero1")).status).toBe(201); // no PayHero: manual fallback
+    expect((await send("PUT", "/v1/settings/payments", { username: "ph-user", password: "ph-secret", channelId: 123 }, t)).status).toBe(200);
+
+    const codes: Record<string, object> = {
+      [`A${run}`]: { status: "SUCCESS", provider_reference: `A${run}`, amount: 50 },
+      [`B${run}`]: { status: "SUCCESS", provider_reference: `B${run}`, amount: 49 },
+      [`C${run}`]: { status: "SUCCESS", provider_reference: `C${run}` },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname.endsWith("/transactions")) return new Response(JSON.stringify({ transactions: [{ amount: 50, transaction_reference: `C${run}` }], pagination: {} }));
+      const st = codes[u.searchParams.get("reference")!];
+      return new Response(JSON.stringify(st ?? { status: "FAILED" }));
+    }));
+    const ok = await json(sale(`a${run}`));
+    expect(ok).toMatchObject({ status: "PAID" });
+    expect((await sale(`A${run}`)).status).toBe(409); // a code settles only one payment
+    expect((await sale(`B${run}`)).status).toBe(422); // wrong amount
+    expect((await sale(`Z${run}`)).status).toBe(422); // unknown code
+    expect((await sale(`C${run}`)).status).toBe(201); // amount taken from the transactions list
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("down"); }));
+    expect((await sale(`D${run}`)).status).toBe(503);
+  });
 });

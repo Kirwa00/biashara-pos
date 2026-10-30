@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { requireAuth, requirePermission } from "../auth";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
+import { verifyMpesaCodes } from "../payhero";
 import { currentShiftId } from "./shifts";
 import { postMovement, resolveBranch } from "./stock";
 
@@ -22,6 +23,15 @@ export async function nextNumber(tx: Tx, bid: string, type: string): Promise<num
 
 const statusFor = (type: string, total: number, paid: number) =>
   type === "QUOTE" ? "OPEN" : paid >= total ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID";
+
+/** Friendly error before the unique index would reject a reused M-Pesa code. */
+async function assertCodesUnused(tx: Tx, payments: { method: string; reference?: string }[]) {
+  for (const p of payments) {
+    if (p.method !== "MPESA" || !p.reference) continue;
+    const [used] = await tx`SELECT 1 FROM payments WHERE method = 'MPESA' AND direction = 1 AND status <> 'FAILED' AND upper(reference) = ${p.reference.toUpperCase()}`;
+    if (used) throw new HTTPException(409, { message: `M-Pesa code ${p.reference.toUpperCase()} has already been used` });
+  }
+}
 
 /** Adds a confirmed payment to a document, rejecting overpayment. Caller must hold the document row lock. */
 export async function applyPayment(tx: Tx, doc: postgres.Row, amountCents: number) {
@@ -81,6 +91,7 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
     await tx`INSERT INTO document_lines (business_id, document_id, product_id, description, quantity, unit_price_cents, tax_code, net_cents, tax_cents, total_cents, unit_cost_cents)
       VALUES (${ctx.bid}, ${doc!.id}, ${l.productId}, ${l.p.name}, ${l.quantity}, ${l.price}, ${l.p.tax_code}, ${l.t.netCents}, ${l.t.taxCents}, ${l.t.totalCents}, ${cost})`;
   }
+  await assertCodesUnused(tx, body.payments);
   for (const p of body.payments)
     await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id) VALUES (${ctx.bid}, ${doc!.id}, ${p.method}, ${p.amountCents}, ${p.reference ?? null}, ${ctx.sub}, ${currentShiftId(tx, ctx.sub)})`;
   await audit(tx, { businessId: ctx.bid, userId: ctx.sub, action: `document.create`, entity: body.type.toLowerCase(), entityId: doc!.id, after: { number, total, paid } });
@@ -106,8 +117,9 @@ export const documentRoutes = new Hono<AppEnv>()
   })))
   .post("/documents", zValidator("json", documentSchema), async (c) => {
     const { sub, bid, role } = c.get("auth");
-    const body = c.req.valid("json");
-    if (!can(role, canCreate(body.type))) throw new HTTPException(403, { message: "Not allowed" });
+    const input = c.req.valid("json");
+    if (!can(role, canCreate(input.type))) throw new HTTPException(403, { message: "Not allowed" });
+    const body = { ...input, payments: await verifyMpesaCodes(c.env, c.get("sql"), bid, input.payments) };
     return c.json(await withTenant(c.get("sql"), bid, (tx) => createDocument(tx, { bid, sub }, body)), 201);
   })
   .post("/documents/:id/convert", requirePermission("invoices.manage"), async (c) => {
@@ -168,12 +180,13 @@ export const documentRoutes = new Hono<AppEnv>()
   })
   .post("/documents/:id/payments", requirePermission("payments.record"), zValidator("json", paymentInputSchema), async (c) => {
     const { sub, bid } = c.get("auth");
-    const p = c.req.valid("json");
+    const [p] = await verifyMpesaCodes(c.env, c.get("sql"), bid, [c.req.valid("json")]);
     return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${c.req.param("id")} AND type <> 'QUOTE' FOR UPDATE`;
       if (!doc) throw new HTTPException(404, { message: "Invoice not found" });
-      await applyPayment(tx, doc, p.amountCents);
-      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id) VALUES (${bid}, ${doc.id}, ${p.method}, ${p.amountCents}, ${p.reference ?? null}, ${sub}, ${currentShiftId(tx, sub)}) RETURNING *`;
+      await applyPayment(tx, doc, p!.amountCents);
+      await assertCodesUnused(tx, [p!]);
+      const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id) VALUES (${bid}, ${doc.id}, ${p!.method}, ${p!.amountCents}, ${p!.reference ?? null}, ${sub}, ${currentShiftId(tx, sub)}) RETURNING *`;
       await audit(tx, { businessId: bid, userId: sub, action: "payment.record", entity: "payment", entityId: pay!.id, after: p });
       return pay;
     }), 201);

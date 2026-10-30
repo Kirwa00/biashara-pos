@@ -5,15 +5,11 @@ import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
 import { decryptSecret, encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
-import type { AppEnv, Env } from "../env";
+import type { AppEnv } from "../env";
+import { amountShillings, base, key, payheroGet, type TxStatus } from "../payhero";
 import { applyPayment } from "./documents";
 import { currentShiftId } from "./shifts";
 
-const base = (env: Env) => env.PAYHERO_BASE_URL ?? "https://backend.payhero.co.ke";
-const key = (env: Env) => {
-  if (!env.ENCRYPTION_KEY) throw new HTTPException(500, { message: "ENCRYPTION_KEY not configured" });
-  return env.ENCRYPTION_KEY;
-};
 const basic = (u: string, p: string) => `Basic ${btoa(`${u}:${p}`)}`;
 const toPhone254 = (p: string) => p.replace(/^\+/, "").replace(/^0/, "254");
 
@@ -84,17 +80,16 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
     const [pay] = await tx`SELECT * FROM payments WHERE id = ${ref} AND status = 'PENDING' FOR UPDATE`;
     if (!pay?.provider_ref) return;
     const [s] = await tx`SELECT * FROM payment_settings`;
-    const password = await decryptSecret(key(c.env), s!.payhero_password_enc);
-    const res = await fetch(`${base(c.env)}/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`, { headers: { authorization: basic(s!.payhero_username, password) } }).catch(() => null);
-    if (!res?.ok) return;
-    const st = (await res.json()) as { status?: string; provider_reference?: string; amount?: number; reference?: string; external_reference?: string };
+    const st = await payheroGet<TxStatus>(c.env, s!, `/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`);
+    if (!st) return;
     const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id;
     if (st.status === "SUCCESS") {
-      if (!sameTx || !st.provider_reference || st.amount === undefined || Math.round(st.amount * 100) !== Number(pay.amount_cents)) return;
+      const amount = sameTx && st.provider_reference ? await amountShillings(c.env, s!, st) : undefined;
+      if (amount === undefined || Math.round(amount * 100) !== Number(pay.amount_cents)) return;
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${pay.document_id} FOR UPDATE`;
       await applyPayment(tx, doc!, Number(pay.amount_cents));
       // Shift is assigned at confirmation so a closed shift's Z totals never change; late confirmations land on the cashier's next open shift.
-      await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference ?? null}, shift_id = ${currentShiftId(tx, pay.created_by)} WHERE id = ${pay.id}`;
+      await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference!.toUpperCase()}, shift_id = ${currentShiftId(tx, pay.created_by)} WHERE id = ${pay.id}`;
       await audit(tx, { businessId: row.bid as string, action: "payment.mpesa.confirmed", entity: "payment", entityId: pay.id, after: st });
     } else if (st.status === "FAILED") {
       await tx`UPDATE payments SET status = 'FAILED' WHERE id = ${pay.id}`;
