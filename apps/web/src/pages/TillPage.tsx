@@ -1,69 +1,532 @@
 import { computeLine, formatKes, toCents, unitPrice, type TaxCode } from "@kpos/shared";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import { api } from "../api";
-import { Card, Note, useLoad, type Product } from "./ui";
+import { Note, useLoad, type Customer, type Product } from "./ui";
 
-type Shift = { id: string; opened_at: string; expected_cash_cents: number; by_method: { method: string; amount_cents: string }[] };
+type Shift = {
+  id: string;
+  opened_at: string;
+  expected_cash_cents: number;
+  by_method: { method: string; amount_cents: string }[];
+};
 
-type Line = { product: Product; quantity: number };
+type CartLine = {
+  product: Product;
+  quantity: number;
+};
+
+type TenderMode = "CASH" | "MPESA_STK" | "MPESA_CODE" | "CARD" | "CREDIT";
 
 export function TillPage() {
-  const [q, setQ] = useState("");
-  const results = useLoad<Product[]>(`/products?q=${encodeURIComponent(q)}`, []);
-  const [cart, setCart] = useState<Line[]>([]);
-  const [method, setMethod] = useState("CASH");
-  const [ref, setRef] = useState("");
+  const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  
+  // Tenders
+  const [tenderMode, setTenderMode] = useState<TenderMode>("CASH");
+  const [cashTendered, setCashTendered] = useState<string>("");
+  const [mpesaCode, setMpesaCode] = useState<string>("");
+  const [mpesaPhone, setMpesaPhone] = useState<string>("");
+  const [cardRef, setCardRef] = useState<string>("");
+  
+  // Status & Confirmation
   const [msg, setMsg] = useState("");
+  const [isCharging, setIsCharging] = useState(false);
+  const [lastSale, setLastSale] = useState<{ id: string; number: number; total_cents: string; change_cents: number } | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Data
+  const products = useLoad<Product[]>(`/products?limit=500${search ? `&q=${encodeURIComponent(search)}` : ""}`, []);
+  const customers = useLoad<Customer[]>("/customers", []);
   const shift = useLoad<Shift | null>("/shifts/current", null);
-  const [lastId, setLastId] = useState("");
-  const add = (p: Product) => setCart((c) => { const i = c.findIndex((l) => l.product.id === p.id); return i < 0 ? [...c, { product: p, quantity: 1 }] : c.map((l, j) => (j === i ? { ...l, quantity: l.quantity + 1 } : l)); });
-  const lineTotal = ({ product: p, quantity }: Line) => computeLine({ quantity, taxCode: p.tax_code as TaxCode, priceIncludesTax: p.price_includes_tax,
-    unitPriceCents: unitPrice({ retailPriceCents: Number(p.retail_price_cents), wholesalePriceCents: p.wholesale_price_cents == null ? null : Number(p.wholesale_price_cents), wholesaleMinQty: p.wholesale_min_qty == null ? null : Number(p.wholesale_min_qty) }, quantity) }).totalCents;
-  const estimate = cart.reduce((s, l) => s + lineTotal(l), 0);
-  async function pay(amount: string) {
+
+  // Auto-focus search input on mount
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
+  // Add product to cart
+  const addToCart = (product: Product) => {
+    setCart((current) => {
+      const idx = current.findIndex((item) => item.product.id === product.id);
+      if (idx >= 0) {
+        return current.map((item, i) =>
+          i === idx ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      }
+      return [...current, { product, quantity: 1 }];
+    });
+  };
+
+  // Adjust quantity
+  const updateQuantity = (productId: string, delta: number) => {
+    setCart((current) =>
+      current
+        .map((item) =>
+          item.product.id === productId
+            ? { ...item, quantity: Math.max(0, item.quantity + delta) }
+            : item
+        )
+        .filter((item) => item.quantity > 0)
+    );
+  };
+
+  const removeLine = (productId: string) => {
+    setCart((current) => current.filter((item) => item.product.id !== productId));
+  };
+
+  // Barcode / Enter key handling
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && products.data.length > 0) {
+      e.preventDefault();
+      // If exact SKU or barcode match, or first search result
+      const match = products.data.find(
+        (p) => p.sku.toLowerCase() === search.trim().toLowerCase()
+      ) || products.data[0];
+      
+      if (match) {
+        addToCart(match);
+        setSearch("");
+      }
+    }
+  };
+
+  // Price calculation
+  const getLinePriceCents = (p: Product, qty: number) => {
+    return unitPrice(
+      {
+        retailPriceCents: Number(p.retail_price_cents),
+        wholesalePriceCents: p.wholesale_price_cents == null ? null : Number(p.wholesale_price_cents),
+        wholesaleMinQty: p.wholesale_min_qty == null ? null : Number(p.wholesale_min_qty),
+      },
+      qty
+    );
+  };
+
+  const getLineTotals = ({ product: p, quantity }: CartLine) => {
+    return computeLine({
+      quantity,
+      taxCode: p.tax_code as TaxCode,
+      priceIncludesTax: p.price_includes_tax,
+      unitPriceCents: getLinePriceCents(p, quantity),
+    });
+  };
+
+  const cartTotalCents = cart.reduce((sum, line) => sum + getLineTotals(line).totalCents, 0);
+  const cartTaxCents = cart.reduce((sum, line) => sum + getLineTotals(line).taxCents, 0);
+  const cartNetCents = cartTotalCents - cartTaxCents;
+
+  // Cash change calculation
+  const cashGivenCents = cashTendered ? toCents(cashTendered) : 0;
+  const changeDueCents = tenderMode === "CASH" && cashGivenCents > cartTotalCents
+    ? cashGivenCents - cartTotalCents
+    : 0;
+
+  // Process Checkout
+  async function handleCheckout() {
+    if (!cart.length) return;
+    if (!shift.data) {
+      setMsg("Cannot complete sale: no open till shift. Please open a shift first.");
+      return;
+    }
+
+    setIsCharging(true);
+    setMsg("");
+
     try {
-      const doc = await api<{ id: string; number: number; total_cents: string }>("/documents", { method: "POST", body: JSON.stringify({
-        type: "SALE", idempotencyKey: crypto.randomUUID(), lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
-        payments: [{ method, amountCents: amount ? toCents(amount) : estimate, reference: ref || undefined }] }) });
-      setMsg(`Sale #${doc.number} — ${formatKes(Number(doc.total_cents))}`); setLastId(doc.id); shift.reload(); setCart([]); setRef("");
-    } catch (e) { setMsg((e as Error).message); }
+      let payments: { method: string; amountCents: number; reference?: string }[] = [];
+
+      if (tenderMode === "CASH") {
+        payments = [{ method: "CASH", amountCents: cartTotalCents }];
+      } else if (tenderMode === "MPESA_CODE") {
+        if (!mpesaCode.trim()) throw new Error("Please enter the M-Pesa transaction code");
+        payments = [{ method: "MPESA", amountCents: cartTotalCents, reference: mpesaCode.trim().toUpperCase() }];
+      } else if (tenderMode === "CARD") {
+        payments = [{ method: "CARD", amountCents: cartTotalCents, reference: cardRef.trim() || undefined }];
+      } else if (tenderMode === "CREDIT") {
+        if (!selectedCustomer) throw new Error("Please select a registered customer for credit sales");
+        payments = []; // Unpaid invoice / credit sale
+      }
+
+      const doc = await api<{ id: string; number: number; total_cents: string }>("/documents", {
+        method: "POST",
+        body: JSON.stringify({
+          type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
+          idempotencyKey: crypto.randomUUID(),
+          customerId: selectedCustomer?.id || undefined,
+          lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
+          payments,
+        }),
+      });
+
+      // If STK push was chosen, initiate it now
+      if (tenderMode === "MPESA_STK") {
+        if (!mpesaPhone.trim()) throw new Error("Please enter phone number for M-Pesa STK Push");
+        await api("/payments/stk", {
+          method: "POST",
+          body: JSON.stringify({
+            documentId: doc.id,
+            phone: mpesaPhone.trim(),
+            amountCents: cartTotalCents,
+          }),
+        });
+        setMsg(`STK Push sent to ${mpesaPhone}. Awaiting confirmation on customer phone.`);
+      }
+
+      setLastSale({
+        id: doc.id,
+        number: doc.number,
+        total_cents: doc.total_cents,
+        change_cents: changeDueCents,
+      });
+
+      // Clear Cart & Tenders
+      setCart([]);
+      setCashTendered("");
+      setMpesaCode("");
+      setCardRef("");
+      shift.reload();
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setIsCharging(false);
+    }
   }
+
   return (
-    <div className="grid gap-6 xl:grid-cols-3">
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-card p-4 xl:col-span-3">
-        {shift.data ? (<>
-          <span className="flex-1 text-sm">Shift open since {new Date(shift.data.opened_at).toLocaleTimeString()} · cash expected in drawer <b className="num">{formatKes(shift.data.expected_cash_cents)}</b></span>
-          <button className="rounded-lg border border-line px-3 py-2" onClick={async () => {
-            const counted = prompt("Cash counted in drawer (KES)"); if (!counted) return;
-            try { const z = await api<{ expected_cash_cents: number; variance_cents: number }>(`/shifts/${shift.data!.id}/close`, { method: "POST", body: JSON.stringify({ countedCashCents: toCents(counted) }) });
-              setMsg(`Shift closed. Expected ${formatKes(z.expected_cash_cents)}, variance ${formatKes(z.variance_cents)}`); shift.reload(); } catch (e) { setMsg((e as Error).message); }
-          }}>Close shift (Z)</button>
-        </>) : (<>
-          <span className="flex-1 text-sm">No shift open. Open one so cash-up can balance.</span>
-          <button className="btn-primary" onClick={async () => {
-            const float = prompt("Opening float (KES)", "0"); if (float === null) return;
-            try { await api("/shifts/open", { method: "POST", body: JSON.stringify({ openingFloatCents: toCents(float || "0") }) }); shift.reload(); } catch (e) { setMsg((e as Error).message); }
-          }}>Open shift</button>
-        </>)}
+    <div className="flex flex-col gap-6 xl:flex-row min-h-[calc(100vh-8rem)]">
+      {/* LEFT CANVAS: Products Catalog & Fast Scanner (60%) */}
+      <div className="flex flex-1 flex-col space-y-4 min-w-0">
+        {/* Active Shift Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card p-3 shadow-xs">
+          {shift.data ? (
+            <>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="h-2.5 w-2.5 rounded-full bg-primary animate-pulse" />
+                <span className="font-medium text-ink">
+                  Shift Open · Cash Expected: <strong className="num text-primary font-bold">{formatKes(shift.data.expected_cash_cents)}</strong>
+                </span>
+              </div>
+              <Link to="/shifts" className="text-xs font-semibold text-primary hover:underline">
+                Manage Shift / Z-Reading →
+              </Link>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-sm text-warning font-medium">
+                <span>⚠️ No till shift open. Open a shift to record cash takings.</span>
+              </div>
+              <Link to="/shifts" className="btn-primary text-xs h-8 px-3">
+                Open Shift Now
+              </Link>
+            </>
+          )}
+        </div>
+
+        {/* Search & Barcode Scan Bar */}
+        <div className="relative">
+          <input
+            ref={searchInputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Scan barcode or type product name / SKU (Press Enter)..."
+            className="input pr-10 text-base font-medium shadow-xs"
+          />
+          {search && (
+            <button
+              onClick={() => {
+                setSearch("");
+                searchInputRef.current?.focus();
+              }}
+              className="absolute right-3 top-3 text-muted hover:text-ink text-sm"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Product Grid */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {products.data.map((p) => {
+              const inCart = cart.find((item) => item.product.id === p.id);
+              const price = Number(p.retail_price_cents);
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => addToCart(p)}
+                  className={`relative flex flex-col justify-between rounded-xl border p-3.5 text-left transition hover:border-primary hover:shadow-sm ${
+                    inCart ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-line bg-card"
+                  }`}
+                >
+                  {inCart && (
+                    <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-white shadow-xs">
+                      {inCart.quantity}
+                    </span>
+                  )}
+                  <div>
+                    <span className="font-mono text-[11px] uppercase tracking-wider text-muted">{p.sku}</span>
+                    <h3 className="line-clamp-2 mt-0.5 text-sm font-semibold text-ink leading-tight">
+                      {p.name}
+                    </h3>
+                  </div>
+                  <div className="mt-3 flex items-baseline justify-between">
+                    <span className="num font-display text-base font-bold text-ink">
+                      {formatKes(price)}
+                    </span>
+                    <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-bold text-muted">
+                      VAT [{p.tax_code}]
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+            {products.data.length === 0 && (
+              <div className="col-span-full py-12 text-center text-muted">
+                No matching products found. Scan a valid barcode or add items in Products.
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-      <Card title="Products" className="xl:col-span-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Scan barcode or search" autoFocus className="input mb-4" />
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{results.data.slice(0, 40).map((p) => (
-          <button key={p.id} onClick={() => add(p)} className="rounded-lg border border-line p-3 text-left hover:bg-surface"><div className="font-medium">{p.name}</div><div className="num text-sm text-muted">{formatKes(Number(p.retail_price_cents))}</div></button>))}</div>
-      </Card>
-      <Card title="Cart">
-        <Note msg={msg} />
-        {lastId && <a href={`/receipt/${lastId}`} target="_blank" rel="noreferrer" className="mb-3 block text-sm text-primary">Print last receipt</a>}
-        {cart.map((l) => (
-          <div key={l.product.id} className="flex items-center gap-2 border-b border-line py-2 text-sm">
-            <span className="flex-1">{l.product.name}</span>
-            <input type="number" min={0} value={l.quantity} onChange={(e) => setCart((c) => c.map((x) => (x === l ? { ...x, quantity: Number(e.target.value) } : x)).filter((x) => x.quantity > 0))} className="input w-20" />
-          </div>))}
-        <p className="my-4 text-right font-display text-2xl font-bold">{formatKes(estimate)}</p>
-        <select value={method} onChange={(e) => setMethod(e.target.value)} className="input mb-3"><option value="CASH">Cash</option><option value="MPESA">M-Pesa (code)</option><option value="CARD">Card</option></select>
-        {method !== "CASH" && <input value={ref} onChange={(e) => setRef(e.target.value.toUpperCase())} placeholder="Transaction code" className="input mb-3" />}
-        <button disabled={!cart.length} onClick={() => pay("")} className="btn-primary w-full">Charge</button>
-      </Card>
+
+      {/* RIGHT PANEL: Fixed Cart Slip & Checkout Dock (40% - min 380px) */}
+      <div className="w-full xl:w-[420px] shrink-0 flex flex-col rounded-2xl border border-line bg-card shadow-sm overflow-hidden">
+        {/* Customer Selector Header */}
+        <div className="border-b border-line bg-surface/50 p-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted">Customer Account</span>
+            {selectedCustomer && (
+              <button
+                onClick={() => setSelectedCustomer(null)}
+                className="text-xs text-muted hover:text-ink"
+              >
+                Reset to Walk-in
+              </button>
+            )}
+          </div>
+          <select
+            value={selectedCustomer?.id || ""}
+            onChange={(e) => {
+              const c = customers.data.find((cust) => cust.id === e.target.value);
+              setSelectedCustomer(c || null);
+            }}
+            className="input h-10 text-sm"
+          >
+            <option value="">Walk-in Customer (Standard Retail)</option>
+            {customers.data.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Cart Itemized Lines */}
+        <div className="flex-1 overflow-y-auto p-4 divide-y divide-line">
+          {cart.map((line) => {
+            const totals = getLineTotals(line);
+            return (
+              <div key={line.product.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-ink">{line.product.name}</p>
+                    <p className="num text-xs text-muted">
+                      {formatKes(getLinePriceCents(line.product, line.quantity))} × {line.quantity}
+                    </p>
+                  </div>
+                  <span className="num font-semibold text-sm text-ink">{formatKes(totals.totalCents)}</span>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between">
+                  <div className="flex items-center rounded-lg border border-line bg-surface">
+                    <button
+                      onClick={() => updateQuantity(line.product.id, -1)}
+                      className="px-2.5 py-1 text-sm font-bold text-muted hover:text-ink"
+                    >
+                      -
+                    </button>
+                    <span className="num px-2 text-xs font-bold">{line.quantity}</span>
+                    <button
+                      onClick={() => updateQuantity(line.product.id, 1)}
+                      className="px-2.5 py-1 text-sm font-bold text-muted hover:text-ink"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => removeLine(line.product.id)}
+                    className="text-xs text-critical hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {cart.length === 0 && (
+            <div className="py-16 text-center text-muted">
+              <p className="text-sm font-medium">Cart is empty</p>
+              <p className="text-xs mt-1">Scan an item or click a product tile to begin checkout</p>
+            </div>
+          )}
+        </div>
+
+        {/* Cart Totals & Checkout Tenders */}
+        <div className="border-t border-line bg-surface/30 p-4 space-y-4">
+          <Note msg={msg} />
+
+          {/* Last Sale Confirmation Banner */}
+          {lastSale && (
+            <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-primary">Sale #{lastSale.number} Completed!</span>
+                <a
+                  href={`/receipt/${lastSale.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded bg-primary px-2.5 py-1 text-xs font-bold text-white hover:bg-primary-active"
+                >
+                  Print Receipt
+                </a>
+              </div>
+              {lastSale.change_cents > 0 && (
+                <p className="mt-1 font-semibold text-ink">
+                  Change Due: <span className="num font-bold text-primary">{formatKes(lastSale.change_cents)}</span>
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Totals Breakdown */}
+          <div className="space-y-1.5 text-xs text-muted">
+            <div className="flex justify-between">
+              <span>Taxable Net</span>
+              <span className="num">{formatKes(cartNetCents)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>16% Output VAT</span>
+              <span className="num">{formatKes(cartTaxCents)}</span>
+            </div>
+            <div className="flex justify-between pt-1 text-base font-bold text-ink border-t border-line">
+              <span>Grand Total</span>
+              <span className="num text-xl font-display text-primary">{formatKes(cartTotalCents)}</span>
+            </div>
+          </div>
+
+          {/* Tender Mode Selector */}
+          <div className="grid grid-cols-4 gap-1.5 rounded-lg border border-line bg-card p-1 text-xs font-semibold">
+            <button
+              onClick={() => setTenderMode("CASH")}
+              className={`rounded py-1.5 transition ${tenderMode === "CASH" ? "bg-navy text-white shadow-xs" : "text-muted hover:text-ink"}`}
+            >
+              Cash
+            </button>
+            <button
+              onClick={() => setTenderMode("MPESA_CODE")}
+              className={`rounded py-1.5 transition ${tenderMode === "MPESA_CODE" ? "bg-navy text-white shadow-xs" : "text-muted hover:text-ink"}`}
+            >
+              M-Pesa
+            </button>
+            <button
+              onClick={() => setTenderMode("MPESA_STK")}
+              className={`rounded py-1.5 transition ${tenderMode === "MPESA_STK" ? "bg-navy text-white shadow-xs" : "text-muted hover:text-ink"}`}
+            >
+              STK Push
+            </button>
+            <button
+              onClick={() => setTenderMode("CREDIT")}
+              className={`rounded py-1.5 transition ${tenderMode === "CREDIT" ? "bg-navy text-white shadow-xs" : "text-muted hover:text-ink"}`}
+            >
+              Credit
+            </button>
+          </div>
+
+          {/* Tender-Specific Inputs */}
+          {tenderMode === "CASH" && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted font-medium">Cash Given:</span>
+                {changeDueCents > 0 && (
+                  <span className="font-bold text-primary">Change: {formatKes(changeDueCents)}</span>
+                )}
+              </div>
+              <input
+                type="number"
+                step="1"
+                placeholder={`e.g. ${Math.ceil(cartTotalCents / 100) || 500}`}
+                value={cashTendered}
+                onChange={(e) => setCashTendered(e.target.value)}
+                className="input font-display text-lg"
+              />
+              {/* Quick Cash Buttons */}
+              <div className="grid grid-cols-4 gap-1.5 text-xs font-semibold">
+                {[100, 500, 1000, 2000].map((note) => (
+                  <button
+                    key={note}
+                    onClick={() => setCashTendered(String(note))}
+                    className="rounded border border-line bg-surface py-1 hover:bg-line"
+                  >
+                    KES {note}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tenderMode === "MPESA_CODE" && (
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase text-muted">M-Pesa Transaction Code</label>
+              <input
+                value={mpesaCode}
+                onChange={(e) => setMpesaCode(e.target.value.toUpperCase())}
+                placeholder="e.g. TBD829X10Q"
+                className="input font-mono uppercase text-base"
+              />
+              <p className="mt-1 text-[11px] text-muted">Verified directly against PayHero API on checkout</p>
+            </div>
+          )}
+
+          {tenderMode === "MPESA_STK" && (
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase text-muted">Customer M-Pesa Phone</label>
+              <input
+                value={mpesaPhone}
+                onChange={(e) => setMpesaPhone(e.target.value)}
+                placeholder="0712345678"
+                className="input text-base"
+              />
+              <p className="mt-1 text-[11px] text-muted">Customer receives PIN prompt on their phone</p>
+            </div>
+          )}
+
+          {tenderMode === "CREDIT" && (
+            <div className="rounded-lg bg-surface p-2.5 text-xs text-muted">
+              {selectedCustomer ? (
+                <p>
+                  Charging to <strong className="text-ink">{selectedCustomer.name}</strong> account. An unpaid tax invoice will be generated.
+                </p>
+              ) : (
+                <p className="text-critical font-medium">Please select a customer from the dropdown above to allow credit sale.</p>
+              )}
+            </div>
+          )}
+
+          {/* Complete Charge Button */}
+          <button
+            onClick={handleCheckout}
+            disabled={!cart.length || isCharging || (tenderMode === "CREDIT" && !selectedCustomer)}
+            className="btn-primary w-full py-3.5 text-base font-bold shadow-md"
+          >
+            {isCharging ? "Processing Sale…" : `Charge ${formatKes(cartTotalCents)}`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
