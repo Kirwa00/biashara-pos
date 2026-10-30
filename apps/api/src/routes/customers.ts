@@ -7,8 +7,14 @@ import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
 
 const row = (b: CustomerInput) => ({
-  name: b.name, phone: b.phone ?? null, email: b.email ?? null, kra_pin: b.kraPin ?? null, address: b.address ?? null,
-  price_tier: b.priceTier, credit_limit_cents: b.creditLimitCents, payment_terms_days: b.paymentTermsDays,
+  name: b.name,
+  phone: b.phone ?? null,
+  email: b.email ?? null,
+  kra_pin: b.kraPin ?? null,
+  address: b.address ?? null,
+  price_tier: b.priceTier,
+  credit_limit_cents: b.creditLimitCents,
+  payment_terms_days: b.paymentTermsDays,
 });
 const COLS = Object.keys(row(customerSchema.parse({ name: "xx" }))) as (keyof ReturnType<typeof row>)[];
 
@@ -18,15 +24,73 @@ export const customerRoutes = new Hono<AppEnv>()
   .use(requireAuth)
   .get("/customers", async (c) => {
     const q = c.req.query("q")?.trim().toLowerCase();
-    return c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`
+    return c.json(
+      await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`
       SELECT * FROM customers WHERE is_active
         ${q ? tx`AND (lower(name) LIKE ${"%" + q + "%"} OR phone LIKE ${"%" + q + "%"} OR lower(kra_pin) = ${q})` : tx``}
-      ORDER BY lower(name) LIMIT 200`));
+      ORDER BY lower(name) LIMIT 200`)
+    );
   })
   .get("/customers/:id", async (c) => {
     const [cust] = await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`SELECT * FROM customers WHERE id = ${c.req.param("id")}`);
     if (!cust) throw new HTTPException(404, { message: "Customer not found" });
     return c.json(cust);
+  })
+  .get("/customers/:id/statement", requirePermission("customers.manage"), async (c) => {
+    const id = c.req.param("id");
+    return c.json(
+      await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
+        const [cust] = await tx`SELECT * FROM customers WHERE id = ${id}`;
+        if (!cust) throw new HTTPException(404, { message: "Customer not found" });
+
+        const documents = await tx`
+          SELECT id, type, number, status, issue_date, due_date, total_cents, paid_cents
+          FROM documents 
+          WHERE customer_id = ${id}
+          ORDER BY issue_date DESC, created_at DESC`;
+
+        const payments = await tx`
+          SELECT p.id, p.document_id, p.method, p.amount_cents, p.reference, p.created_at, p.status, d.number AS doc_number, d.type AS doc_type
+          FROM payments p
+          JOIN documents d ON d.id = p.document_id
+          WHERE d.customer_id = ${id} AND p.status = 'CONFIRMED'
+          ORDER BY p.created_at DESC`;
+
+        let totalInvoicedCents = 0;
+        let totalPaidCents = 0;
+        let totalCreditNotesCents = 0;
+
+        for (const d of documents) {
+          const type = String(d.type);
+          const total = Number(d.total_cents);
+          const paid = Number(d.paid_cents);
+          if (type === "INVOICE" || type === "SALE") {
+            totalInvoicedCents += total;
+            totalPaidCents += paid;
+          } else if (type === "CREDIT_NOTE") {
+            totalCreditNotesCents += total;
+          }
+        }
+
+        const balanceCents = totalInvoicedCents - totalPaidCents - totalCreditNotesCents;
+        const creditLimitCents = Number(cust.credit_limit_cents);
+        const availableCreditCents = Math.max(0, creditLimitCents - balanceCents);
+
+        return {
+          customer: cust,
+          documents,
+          payments,
+          summary: {
+            totalInvoicedCents,
+            totalPaidCents,
+            totalCreditNotesCents,
+            balanceCents,
+            creditLimitCents,
+            availableCreditCents,
+          },
+        };
+      })
+    );
   })
   .post("/customers", requirePermission("customers.manage"), zValidator("json", customerSchema), async (c) => {
     const { sub, bid, role } = c.get("auth");
