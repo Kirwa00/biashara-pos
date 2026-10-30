@@ -16,8 +16,13 @@ import { ReportsPage } from "./pages/ReportsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { TillPage } from "./pages/TillPage";
 import { ReceiptPage } from "./pages/ReceiptPage";
+import { ShiftsPage } from "./pages/ShiftsPage";
+import { ReturnsPage } from "./pages/ReturnsPage";
+import { EtimsPage } from "./pages/EtimsPage";
+import { ZReportPage } from "./pages/ZReportPage";
 
-const Protected = ({ children }: { children: React.ReactNode }) => (session.get() ? children : <Navigate to="/login" replace />);
+const Protected = ({ children }: { children: React.ReactNode }) =>
+  session.get() ? children : <Navigate to="/login" replace />;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -25,20 +30,44 @@ createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
-        <Route path="/receipt/:id" element={<Protected><ReceiptPage /></Protected>} />
-        <Route element={<Protected><AppShell /></Protected>}>
+        <Route
+          path="/receipt/:id"
+          element={
+            <Protected>
+              <ReceiptPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/receipt/shift/:id"
+          element={
+            <Protected>
+              <ZReportPage />
+            </Protected>
+          }
+        />
+        <Route
+          element={
+            <Protected>
+              <AppShell />
+            </Protected>
+          }
+        >
           <Route index element={<Dashboard />} />
-          <Route path="products" element={<ProductsPage />} />
-          <Route path="customers" element={<CustomersPage />} />
-          <Route path="team" element={<TeamPage />} />
           <Route path="till" element={<TillPage />} />
+          <Route path="shifts" element={<ShiftsPage />} />
           <Route path="sales" element={<InvoicesPage />} />
+          <Route path="returns" element={<ReturnsPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="suppliers" element={<SuppliersPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="etims" element={<EtimsPage />} />
+          <Route path="products" element={<ProductsPage />} />
+          <Route path="customers" element={<CustomersPage />} />
+          <Route path="team" element={<TeamPage />} />
           <Route path="settings/payments" element={<PaymentsSettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
-  </StrictMode>,
+  </StrictMode>
 );
