@@ -58,4 +58,13 @@ describe("frame follow-ups", () => {
     stubPayhero((ref) => JSON.stringify({ status: "SUCCESS", provider_reference: ref, amount: 50, channel_id: 999 }));
     expect((await sale(`H${run}`)).status).toBe(422);
   });
+
+  it("offline replay is rejected, not re-priced, when the total changed", async () => {
+    const t = await register("offl");
+    const p = await json<{ id: string }>(post("/v1/products", { sku: "SUGAR", name: "Sugar", retailPriceCents: 10000, trackStock: false }, t));
+    const sale = (expectedTotalCents: number) =>
+      post("/v1/documents", { type: "SALE", expectedTotalCents, lines: [{ productId: p.id, quantity: 1 }], payments: [{ method: "CASH", amountCents: expectedTotalCents }] }, t);
+    expect((await sale(9000)).status).toBe(409);
+    expect((await sale(10000)).status).toBe(201);
+  });
 });
