@@ -67,4 +67,12 @@ describe("frame follow-ups", () => {
     expect((await sale(9000)).status).toBe(409);
     expect((await sale(10000)).status).toBe(201);
   });
+
+  it("wholesale customers are charged wholesale prices", async () => {
+    const t = await register("whsl");
+    const p = await json<{ id: string }>(post("/v1/products", { sku: "RICE", name: "Rice", retailPriceCents: 10000, wholesalePriceCents: 9000, wholesaleMinQty: 10, trackStock: false }, t));
+    const c = await json<{ id: string }>(post("/v1/customers", { name: "Duka Wholesale", priceTier: "WHOLESALE" }, t));
+    const res = await post("/v1/documents", { type: "SALE", customerId: c.id, expectedTotalCents: 9000, lines: [{ productId: p.id, quantity: 1 }], payments: [{ method: "CASH", amountCents: 9000 }] }, t);
+    expect(res.status).toBe(201);
+  });
 });

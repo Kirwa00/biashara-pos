@@ -129,7 +129,8 @@ export function TillPage() {
         wholesalePriceCents: p.wholesale_price_cents == null ? null : Number(p.wholesale_price_cents),
         wholesaleMinQty: p.wholesale_min_qty == null ? null : Number(p.wholesale_min_qty),
       },
-      qty
+      qty,
+      selectedCustomer?.price_tier
     );
   };
 
@@ -182,8 +183,8 @@ export function TillPage() {
       const body = {
         type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
         idempotencyKey: crypto.randomUUID(),
-        // Credit invoices are priced by the customer's tier on the server; paid sales must match what the till charged.
-        expectedTotalCents: tenderMode === "CREDIT" ? undefined : cartTotalCents,
+        // The server must agree with what the till showed (same customer price tier); a repriced sale is refused, not altered.
+        expectedTotalCents: cartTotalCents,
         customerId: selectedCustomer?.id || undefined,
         lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
         payments,
@@ -380,7 +381,7 @@ export function TillPage() {
             <option value="">Walk-in Customer (Standard Retail)</option>
             {customers.data.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name}
+                {c.name}{c.price_tier === "WHOLESALE" ? " (Wholesale)" : ""}
               </option>
             ))}
           </select>

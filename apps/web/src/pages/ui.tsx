@@ -26,7 +26,7 @@ export const Card = ({ title, children, className = "" }: { title: string; child
 );
 export const Note = ({ msg }: { msg: string }) => (msg ? <p className="mb-3 rounded-lg bg-surface p-3 text-sm">{msg}</p> : null);
 export type Product = { id: string; sku: string; name: string; retail_price_cents: string; wholesale_price_cents: string | null; wholesale_min_qty: string | null; tax_code: string; price_includes_tax: boolean };
-export type Customer = { id: string; name: string };
+export type Customer = { id: string; name: string; price_tier?: "RETAIL" | "WHOLESALE" };
 export const ProductSelect = ({ products, name = "productId" }: { products: Product[]; name?: string }) => (
   <select name={name} required className="input"><option value="">Product…</option>{products.map((p) => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}</select>
 );
