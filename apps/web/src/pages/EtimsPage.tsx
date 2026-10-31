@@ -83,7 +83,7 @@ export function EtimsPage() {
               <tr><th className="py-2.5">Doc #</th><th>Date</th><th>Customer / PIN</th><th className="text-right">Net</th><th className="text-right">VAT</th><th className="text-right">Total</th><th>eTIMS</th><th className="text-right">Receipt</th></tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {invoices.data.map((i) => (
+              {invoices.data.slice(0, 200).map((i) => (
                 <tr key={i.id}>
                   <td className="py-3 font-semibold">{docNo(i)}</td>
                   <td>{i.issue_date.slice(0, 10)}</td>
@@ -95,6 +95,7 @@ export function EtimsPage() {
                   <td className="text-right"><a href={`/receipt/${i.id}`} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">View</a></td>
                 </tr>
               ))}
+              {invoices.data.length > 200 && <tr><td colSpan={8} className="py-3 text-center text-muted">Showing the latest 200 of {invoices.data.length}; the CSV export includes all.</td></tr>}
               {!invoices.data.length && <tr><td colSpan={8} className="py-6 text-center text-muted">No sales, invoices or credit notes in {period}.</td></tr>}
             </tbody>
           </table>

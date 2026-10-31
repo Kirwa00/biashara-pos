@@ -41,6 +41,7 @@ export const etimsRoutes = new Hono<AppEnv>()
       };
     }));
   })
+  // Whole month, uncapped: the VAT CSV must match the summary totals.
   .get("/etims/invoices", requirePermission("reports.view"), async (c) => {
     const period = periodOf(c.req.query("period"));
     return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
@@ -49,7 +50,7 @@ export const etimsRoutes = new Hono<AppEnv>()
           cu.name AS customer_name, cu.kra_pin AS customer_kra_pin
         FROM documents d LEFT JOIN customers cu ON cu.id = d.customer_id
         WHERE d.type IN ('INVOICE','SALE','CREDIT_NOTE') AND to_char(d.issue_date, 'YYYY-MM') = ${period}
-        ORDER BY d.created_at DESC LIMIT 200`;
+        ORDER BY d.created_at DESC`;
       return docs.map((d) => ({ ...d, cuInvoiceNumber: null, etimsStatus: "PENDING" }));
     }));
   });
