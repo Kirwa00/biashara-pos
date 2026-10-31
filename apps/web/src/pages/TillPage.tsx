@@ -2,6 +2,7 @@ import { computeLine, formatKes, toCents, unitPrice, type TaxCode } from "@kpos/
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api";
+import { cacheKey, discardQueued, flushOutbox, isOffline, queueSale, readOutbox } from "../offline";
 import { Note, useLoad, type Customer, type Product } from "./ui";
 
 type Shift = {
@@ -39,9 +40,30 @@ export function TillPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Data
-  const products = useLoad<Product[]>(`/products?limit=500${search ? `&q=${encodeURIComponent(search)}` : ""}`, []);
-  const customers = useLoad<Customer[]>("/customers", []);
-  const shift = useLoad<Shift | null>("/shifts/current", null);
+  const products = useLoad<Product[]>(`/products?limit=500${search ? `&q=${encodeURIComponent(search)}` : ""}`, [], search ? undefined : cacheKey("products"));
+  const customers = useLoad<Customer[]>("/customers", [], cacheKey("customers"));
+  const shift = useLoad<Shift | null>("/shifts/current", null, cacheKey("shift"));
+
+  // Offline outbox: retry on mount, when the browser comes back online, and every 20s.
+  const [outbox, setOutbox] = useState(readOutbox);
+  useEffect(() => {
+    const sync = () => flushOutbox().then(() => setOutbox(readOutbox()));
+    sync();
+    window.addEventListener("online", sync);
+    const t = setInterval(sync, 20_000);
+    return () => { window.removeEventListener("online", sync); clearInterval(t); };
+  }, []);
+
+  // After an STK prompt, poll the payment until PayHero's callback confirms or fails it (~2 min).
+  const pollStk = async (paymentId: string, phone: string) => {
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const p = await api<{ status: string; reference: string | null }>(`/payments/${paymentId}`).catch(() => null);
+      if (p?.status === "CONFIRMED") { setMsg(`M-Pesa payment received from ${phone} (${p.reference}).`); shift.reload(); return; }
+      if (p?.status === "FAILED") { setMsg(`M-Pesa prompt to ${phone} failed or was cancelled. The sale is unpaid: take another payment method.`); return; }
+    }
+    setMsg(`No M-Pesa confirmation from ${phone} after 2 minutes. Check the customer's phone, or record the M-Pesa code on the invoice.`);
+  };
 
   // Auto-focus search input on mount
   useEffect(() => {
@@ -151,29 +173,39 @@ export function TillPage() {
         payments = []; // Unpaid invoice / credit sale
       }
 
-      const doc = await api<{ id: string; number: number; total_cents: string }>("/documents", {
-        method: "POST",
-        body: JSON.stringify({
-          type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
-          idempotencyKey: crypto.randomUUID(),
-          customerId: selectedCustomer?.id || undefined,
-          lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
-          payments,
-        }),
-      });
+      if (tenderMode === "MPESA_STK" && !mpesaPhone.trim()) throw new Error("Please enter phone number for M-Pesa STK Push");
+      const body = {
+        type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
+        idempotencyKey: crypto.randomUUID(),
+        customerId: selectedCustomer?.id || undefined,
+        lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
+        payments,
+      };
+      let doc: { id: string; number: number; total_cents: string };
+      try {
+        doc = await api<typeof doc>("/documents", { method: "POST", body: JSON.stringify(body) });
+      } catch (err) {
+        // Cash and card sales can be taken offline; M-Pesa and credit need the server to verify.
+        if (!isOffline(err) || (tenderMode !== "CASH" && tenderMode !== "CARD")) throw err;
+        queueSale(body);
+        setOutbox(readOutbox());
+        setLastSale(null);
+        setCart([]);
+        setCashTendered("");
+        setCardRef("");
+        setMsg(`Offline: sale saved on this device and will sync automatically.${changeDueCents > 0 ? ` Change due ${formatKes(changeDueCents)}.` : ""}`);
+        return;
+      }
 
-      // If STK push was chosen, initiate it now
+      // M-Pesa takes whole shillings; any cents remain on the invoice for another tender.
       if (tenderMode === "MPESA_STK") {
-        if (!mpesaPhone.trim()) throw new Error("Please enter phone number for M-Pesa STK Push");
-        await api("/payments/stk", {
+        const phone = mpesaPhone.trim();
+        const { paymentId } = await api<{ paymentId: string }>("/payments/stk", {
           method: "POST",
-          body: JSON.stringify({
-            documentId: doc.id,
-            phone: mpesaPhone.trim(),
-            amountCents: cartTotalCents,
-          }),
+          body: JSON.stringify({ documentId: doc.id, phone, amountCents: Math.floor(cartTotalCents / 100) * 100 }),
         });
-        setMsg(`STK Push sent to ${mpesaPhone}. Awaiting confirmation on customer phone.`);
+        setMsg(`M-Pesa prompt sent to ${phone}. Waiting for the customer to enter their PIN…`);
+        void pollStk(paymentId, phone);
       }
 
       setLastSale({
@@ -225,6 +257,27 @@ export function TillPage() {
             </>
           )}
         </div>
+
+        {outbox.length > 0 && (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-medium text-ink">
+                {outbox.filter((q) => !q.error).length} offline sale(s) waiting to sync
+              </span>
+              <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => flushOutbox().then(() => setOutbox(readOutbox()))}>
+                Sync now
+              </button>
+            </div>
+            {outbox.filter((q) => q.error).map((q) => (
+              <div key={q.key} className="mt-2 flex items-center justify-between gap-3 text-xs text-critical">
+                <span>Sale saved {new Date(q.queuedAt).toLocaleString()} was rejected: {q.error}</span>
+                <button type="button" className="font-semibold hover:underline" onClick={() => { discardQueued(q.key); setOutbox(readOutbox()); }}>
+                  Discard
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Search & Barcode Scan Bar */}
         <div className="relative">

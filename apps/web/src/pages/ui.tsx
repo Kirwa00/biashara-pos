@@ -2,10 +2,18 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 
 /** Small helpers shared by the prototype pages. */
-export function useLoad<T>(path: string, init: T) {
+/** `cache` keeps the last good response in localStorage and serves it when the device is offline. */
+export function useLoad<T>(path: string, init: T, cache?: string) {
   const [data, setData] = useState<T>(init);
   const [msg, setMsg] = useState("");
-  const reload = () => api<T>(path).then(setData).catch((e: Error) => setMsg(e.message));
+  const reload = () =>
+    api<T>(path)
+      .then((d) => { setData(d); if (cache) localStorage.setItem(cache, JSON.stringify(d)); })
+      .catch((e: Error) => {
+        const hit = cache && e instanceof TypeError ? localStorage.getItem(cache) : null;
+        if (hit) setData(JSON.parse(hit) as T);
+        setMsg(hit ? "Offline: showing the last saved copy." : e.message);
+      });
   useEffect(() => { reload(); }, [path]);
   return { data, reload, msg, setMsg };
 }
