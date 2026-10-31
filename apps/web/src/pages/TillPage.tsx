@@ -2,7 +2,7 @@ import { computeLine, formatKes, toCents, unitPrice, type TaxCode } from "@kpos/
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api";
-import { cacheKey, discardQueued, flushOutbox, isOffline, queueSale, readOutbox } from "../offline";
+import { cacheKey, cashierCacheKey, discardQueued, flushOutbox, isOffline, queueSale, readOutbox } from "../offline";
 import { Note, useLoad, type Customer, type Product } from "./ui";
 
 type Shift = {
@@ -42,7 +42,7 @@ export function TillPage() {
   // Data
   const products = useLoad<Product[]>(`/products?limit=500${search ? `&q=${encodeURIComponent(search)}` : ""}`, [], search ? undefined : cacheKey("products"));
   const customers = useLoad<Customer[]>("/customers", [], cacheKey("customers"));
-  const shift = useLoad<Shift | null>("/shifts/current", null);
+  const shift = useLoad<Shift | null>("/shifts/current", null, cashierCacheKey("shift"));
 
   // Offline outbox: retry on mount, when the browser comes back online, and every 20s.
   const [outbox, setOutbox] = useState(readOutbox);
@@ -182,7 +182,6 @@ export function TillPage() {
       const body = {
         type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
         idempotencyKey: crypto.randomUUID(),
-        expectedTotalCents: cartTotalCents,
         customerId: selectedCustomer?.id || undefined,
         lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
         payments,
@@ -193,7 +192,7 @@ export function TillPage() {
       } catch (err) {
         // Cash and card sales can be taken offline; M-Pesa and credit need the server to verify.
         if (!isOffline(err) || (tenderMode !== "CASH" && tenderMode !== "CARD")) throw err;
-        queueSale(body);
+        queueSale({ ...body, expectedTotalCents: cartTotalCents });
         setOutbox(readOutbox());
         setLastSale(null);
         setCart([]);

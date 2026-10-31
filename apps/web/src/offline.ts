@@ -13,6 +13,8 @@ const claims = (): { bid: string; sub: string } => {
 // Queued sales replay only under the cashier who took them (their branch and shift).
 const outboxKey = () => `kpos.outbox.${claims().bid}.${claims().sub}`;
 export const cacheKey = (name: string) => `kpos.cache.${claims().bid}.${name}`;
+// Display-only for the checkout guard; replay always re-checks /shifts/current.
+export const cashierCacheKey = (name: string) => `kpos.cache.${claims().bid}.${claims().sub}.${name}`;
 
 export const readOutbox = (): Queued[] => JSON.parse(localStorage.getItem(outboxKey()) ?? "[]");
 const write = (q: Queued[]) => localStorage.setItem(outboxKey(), JSON.stringify(q));
