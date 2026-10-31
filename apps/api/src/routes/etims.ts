@@ -3,70 +3,54 @@ import { requireAuth, requirePermission } from "../auth";
 import { withTenant } from "../db";
 import type { AppEnv } from "../env";
 
+/**
+ * Prototype eTIMS view. Nothing is sent to KRA yet: every fiscal document is reported as PENDING
+ * until a real OSCU/VSCU integration exists. VAT figures are real and net of credit notes.
+ */
+const nairobiMonth = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 7);
+const periodOf = (q?: string) => (q && /^\d{4}-(0[1-9]|1[0-2])$/.test(q) ? q : nairobiMonth());
+
 export const etimsRoutes = new Hono<AppEnv>()
   .use(requireAuth)
   .get("/etims/summary", requirePermission("reports.view"), async (c) => {
+    const period = periodOf(c.req.query("period"));
     return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
-      const [vat] = await tx`
-        SELECT 
-          coalesce(sum(tax_cents), 0) AS total_vat_cents,
-          coalesce(sum(net_cents), 0) AS total_taxable_cents,
-          count(*)::int AS total_invoices
-        FROM documents 
-        WHERE type IN ('INVOICE', 'SALE')`;
-
-      const [breakdown] = await tx`
-        SELECT 
-          coalesce(sum(total_cents) FILTER (WHERE tax_cents > 0), 0) AS standard_rated_cents,
-          coalesce(sum(total_cents) FILTER (WHERE tax_cents = 0), 0) AS zero_or_exempt_cents
-        FROM documents
-        WHERE type IN ('INVOICE', 'SALE')`;
-
+      const [v] = await tx`
+        SELECT
+          coalesce(sum(l.tax_cents * s.sign), 0) AS vat,
+          coalesce(sum(l.net_cents * s.sign), 0) AS taxable,
+          coalesce(sum(l.net_cents * s.sign) FILTER (WHERE l.tax_code IN ('B','E')), 0) AS standard,
+          coalesce(sum(l.net_cents * s.sign) FILTER (WHERE l.tax_code NOT IN ('B','E')), 0) AS other
+        FROM document_lines l
+        JOIN documents d ON d.id = l.document_id
+        CROSS JOIN LATERAL (SELECT CASE WHEN d.type = 'CREDIT_NOTE' THEN -1 ELSE 1 END AS sign) s
+        WHERE d.type IN ('INVOICE','SALE','CREDIT_NOTE') AND to_char(d.issue_date, 'YYYY-MM') = ${period}`;
+      const [n] = await tx`SELECT count(*)::int AS n FROM documents WHERE type IN ('INVOICE','SALE','CREDIT_NOTE') AND to_char(issue_date, 'YYYY-MM') = ${period}`;
       return {
-        vscu: {
-          nodeId: "KRA-VSCU-7801-NW",
-          status: "ONLINE",
-          cryptoStatus: "HEALTHY",
-          latencyMs: 48,
-          taxPeriod: new Date().toISOString().slice(0, 7),
-          deadline: "20th",
-        },
+        period,
+        connection: { status: "NOT_CONNECTED", message: "Prototype: eTIMS is not connected to KRA. Documents queue as pending and nothing is submitted." },
         vatSummary: {
-          totalVatCents: Number(vat?.total_vat_cents ?? 0),
-          totalTaxableCents: Number(vat?.total_taxable_cents ?? 0),
-          standardRatedCents: Number(breakdown?.standard_rated_cents ?? 0),
-          zeroOrExemptCents: Number(breakdown?.zero_or_exempt_cents ?? 0),
-          totalInvoices: Number(vat?.total_invoices ?? 0),
-          syncedInvoices: Number(vat?.total_invoices ?? 0),
-          pendingInvoices: 0,
+          totalVatCents: Number(v!.vat),
+          totalTaxableCents: Number(v!.taxable),
+          standardRatedCents: Number(v!.standard),
+          zeroOrExemptCents: Number(v!.other),
+          totalInvoices: n!.n,
+          submittedInvoices: 0,
+          pendingInvoices: n!.n,
         },
       };
     }));
   })
+  // Whole month, uncapped: the VAT CSV must match the summary totals.
   .get("/etims/invoices", requirePermission("reports.view"), async (c) => {
+    const period = periodOf(c.req.query("period"));
     return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
       const docs = await tx`
-        SELECT 
-          d.id, d.type, d.number, d.issue_date, d.net_cents, d.tax_cents, d.total_cents,
+        SELECT d.id, d.type, d.number, d.issue_date, d.net_cents, d.tax_cents, d.total_cents,
           cu.name AS customer_name, cu.kra_pin AS customer_kra_pin
-        FROM documents d
-        LEFT JOIN customers cu ON cu.id = d.customer_id
-        WHERE d.type IN ('INVOICE', 'SALE', 'CREDIT_NOTE')
-        ORDER BY d.created_at DESC
-        LIMIT 50`;
-
-      return docs.map((d) => ({
-        ...d,
-        cuInvoiceNumber: `KRA-2026-${d.type === "CREDIT_NOTE" ? "CN" : "INV"}-${String(d.number).padStart(6, "0")}`,
-        etimsStatus: "SYNCED",
-        qrSignature: `KRA_QR_${d.id.slice(0, 8).toUpperCase()}`,
-      }));
+        FROM documents d LEFT JOIN customers cu ON cu.id = d.customer_id
+        WHERE d.type IN ('INVOICE','SALE','CREDIT_NOTE') AND to_char(d.issue_date, 'YYYY-MM') = ${period}
+        ORDER BY d.created_at DESC`;
+      return docs.map((d) => ({ ...d, cuInvoiceNumber: null, etimsStatus: "PENDING" }));
     }));
-  })
-  .post("/etims/sync", requirePermission("reports.view"), async (c) => {
-    return c.json({
-      success: true,
-      syncedCount: 0,
-      message: "All invoices are reconciled and up to date with KRA eTIMS VSCU node.",
-    });
   });

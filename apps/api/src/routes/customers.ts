@@ -49,8 +49,9 @@ export const customerRoutes = new Hono<AppEnv>()
           WHERE customer_id = ${id}
           ORDER BY issue_date DESC, created_at DESC`;
 
+        // Refunds (direction -1) show as negative so the history reconciles.
         const payments = await tx`
-          SELECT p.id, p.document_id, p.method, p.amount_cents, p.reference, p.created_at, p.status, d.number AS doc_number, d.type AS doc_type
+          SELECT p.id, p.document_id, p.method, p.amount_cents * p.direction AS amount_cents, p.reference, p.created_at, p.status, d.number AS doc_number, d.type AS doc_type
           FROM payments p
           JOIN documents d ON d.id = p.document_id
           WHERE d.customer_id = ${id} AND p.status = 'CONFIRMED'
@@ -59,20 +60,14 @@ export const customerRoutes = new Hono<AppEnv>()
         let totalInvoicedCents = 0;
         let totalPaidCents = 0;
         let totalCreditNotesCents = 0;
-
         for (const d of documents) {
-          const type = String(d.type);
-          const total = Number(d.total_cents);
-          const paid = Number(d.paid_cents);
-          if (type === "INVOICE" || type === "SALE") {
-            totalInvoicedCents += total;
-            totalPaidCents += paid;
-          } else if (type === "CREDIT_NOTE") {
-            totalCreditNotesCents += total;
-          }
+          if (d.type === "INVOICE" || d.type === "SALE") {
+            totalInvoicedCents += Number(d.total_cents);
+            totalPaidCents += Number(d.paid_cents);
+          } else if (d.type === "CREDIT_NOTE") totalCreditNotesCents += Number(d.total_cents);
         }
-
-        const balanceCents = totalInvoicedCents - totalPaidCents - totalCreditNotesCents;
+        // Credit notes are refunded at the till, so they don't reduce what the customer owes.
+        const balanceCents = totalInvoicedCents - totalPaidCents;
         const creditLimitCents = Number(cust.credit_limit_cents);
         const availableCreditCents = Math.max(0, creditLimitCents - balanceCents);
 

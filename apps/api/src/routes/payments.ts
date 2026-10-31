@@ -6,7 +6,7 @@ import { requireAuth, requirePermission } from "../auth";
 import { decryptSecret, encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
-import { amountShillings, base, key, payheroGet, type TxStatus } from "../payhero";
+import { amountShillings, sameChannel, base, key, payheroGet, type TxStatus } from "../payhero";
 import { applyPayment } from "./documents";
 import { currentShiftId } from "./shifts";
 
@@ -82,7 +82,7 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
     const [s] = await tx`SELECT * FROM payment_settings`;
     const st = await payheroGet<TxStatus>(c.env, s!, `/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`);
     if (!st) return;
-    const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id;
+    const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id && sameChannel(s!, st.channel_id);
     if (st.status === "SUCCESS") {
       const amount = sameTx && st.provider_reference ? await amountShillings(c.env, s!, st) : undefined;
       if (amount === undefined || Math.round(amount * 100) !== Number(pay.amount_cents)) return;

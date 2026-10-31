@@ -11,13 +11,17 @@ export const key = (env: Env) => {
 };
 const basic = (u: string, p: string) => `Basic ${btoa(`${u}:${p}`)}`;
 
-export type TxStatus = { status?: string; provider_reference?: string; amount?: number; reference?: string; external_reference?: string };
+export type TxStatus = { status?: string; provider_reference?: string; amount?: number; reference?: string; external_reference?: string; channel_id?: number | string };
+
+/** One PayHero account can hold several channels; when PayHero names the channel it must be this business's. */
+export const sameChannel = (s: postgres.Row, ch?: number | string | null) => ch == null || Number(ch) === Number(s.channel_id);
 
 /** Authenticated GET against the business's own PayHero account; null when PayHero is unreachable. */
 export async function payheroGet<T>(env: Env, s: postgres.Row, path: string): Promise<T | null> {
   const auth = basic(s.payhero_username, await decryptSecret(key(env), s.payhero_password_enc));
   const res = await fetch(`${base(env)}${path}`, { headers: { authorization: auth } }).catch(() => null);
-  return res?.ok ? ((await res.json()) as T) : null;
+  if (!res?.ok) return null;
+  return (await res.json().catch(() => null)) as T | null;
 }
 
 /** PayHero's status response may omit the amount; fall back to the recent account transactions list. */
@@ -25,8 +29,8 @@ export async function amountShillings(env: Env, s: postgres.Row, st: TxStatus): 
   if (st.amount !== undefined) return st.amount;
   const code = st.provider_reference?.toUpperCase();
   for (let page = 1; code && page <= 3; page++) {
-    const r = await payheroGet<{ transactions?: { amount: number; transaction_reference?: string }[]; pagination?: { next_page?: number | null } }>(env, s, `/api/v2/transactions?page=${page}&per=100`);
-    const hit = r?.transactions?.find((t) => t.transaction_reference?.toUpperCase() === code && t.amount > 0);
+    const r = await payheroGet<{ transactions?: { amount: number; transaction_reference?: string; channel_id?: number | string | null }[]; pagination?: { next_page?: number | null } }>(env, s, `/api/v2/transactions?page=${page}&per=100`);
+    const hit = r?.transactions?.find((t) => t.transaction_reference?.toUpperCase() === code && t.amount > 0 && sameChannel(s, t.channel_id));
     if (hit) return hit.amount;
     if (!r?.pagination?.next_page) break;
   }
@@ -49,7 +53,7 @@ export async function verifyMpesaCodes<P extends Pay>(env: Env, sql: postgres.Sq
     if (p.method !== "MPESA" || !p.reference) continue;
     const st = await payheroGet<TxStatus>(env, s, `/api/v2/transaction-status?reference=${encodeURIComponent(p.reference)}`);
     if (!st) throw new HTTPException(503, { message: "Couldn't reach PayHero to check the M-Pesa code — try again" });
-    if (st.status !== "SUCCESS" || st.provider_reference?.toUpperCase() !== p.reference)
+    if (st.status !== "SUCCESS" || st.provider_reference?.toUpperCase() !== p.reference || !sameChannel(s, st.channel_id))
       throw new HTTPException(422, { message: `M-Pesa code ${p.reference} was not found as a completed payment` });
     const amount = await amountShillings(env, s, st);
     if (amount === undefined || Math.round(amount * 100) !== p.amountCents)
