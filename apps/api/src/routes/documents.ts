@@ -119,6 +119,11 @@ export const documentRoutes = new Hono<AppEnv>()
     const { sub, bid, role } = c.get("auth");
     const input = c.req.valid("json");
     if (!can(role, canCreate(input.type))) throw new HTTPException(403, { message: "Not allowed" });
+    // A till retrying a sale it already posted gets the original back without re-checking codes (PayHero may be down).
+    if (input.idempotencyKey) {
+      const [dup] = await withTenant(c.get("sql"), bid, (tx) => tx`SELECT * FROM documents WHERE idempotency_key = ${input.idempotencyKey!}`);
+      if (dup) return c.json(dup, 201);
+    }
     const body = { ...input, payments: await verifyMpesaCodes(c.env, c.get("sql"), bid, input.payments) };
     return c.json(await withTenant(c.get("sql"), bid, (tx) => createDocument(tx, { bid, sub }, body)), 201);
   })
