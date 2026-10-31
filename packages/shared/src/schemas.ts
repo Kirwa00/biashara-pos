@@ -94,6 +94,8 @@ export const documentSchema = z.object({
   customerId: z.string().uuid().optional(),
   dueDays: z.number().int().min(0).max(365).optional(),
   idempotencyKey: z.string().min(8).max(64).optional(),
+  /** Total the till charged (offline replays): reject instead of re-pricing if prices changed since. */
+  expectedTotalCents: z.number().int().nonnegative().optional(),
   lines: z.array(docLine).min(1).max(500),
   payments: z.array(paymentInputSchema).max(5).default([]),
 });

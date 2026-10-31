@@ -67,6 +67,8 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
     return { ...l, p, price, t: computeLine({ unitPriceCents: price, quantity: l.quantity, taxCode: p.tax_code as TaxCode, priceIncludesTax: p.price_includes_tax }) };
   });
   const total = lines.reduce((s, l) => s + l.t.totalCents, 0);
+  if (body.expectedTotalCents !== undefined && body.expectedTotalCents !== total)
+    throw new HTTPException(409, { message: `Prices changed since this sale was taken (now ${total / 100}, charged ${body.expectedTotalCents / 100})` });
   const paid = body.payments.reduce((s, p) => s + p.amountCents, 0);
   if (paid > total) throw new HTTPException(422, { message: "Payments exceed the total" });
   if (body.type === "SALE" && !cust && paid < total) throw new HTTPException(422, { message: "Walk-in sales must be paid in full" });

@@ -4,7 +4,11 @@ type Session = { accessToken: string; refreshToken: string };
 export const session = {
   get: (): Session | null => JSON.parse(localStorage.getItem(KEY) ?? "null"),
   set: (s: Session) => localStorage.setItem(KEY, JSON.stringify(s)),
-  clear: () => localStorage.removeItem(KEY),
+  // Offline caches hold business data, so they go with the session (queued sales stay for their cashier).
+  clear: () => {
+    localStorage.removeItem(KEY);
+    Object.keys(localStorage).filter((k) => k.startsWith("kpos.cache.")).forEach((k) => localStorage.removeItem(k));
+  },
 };
 
 export class ApiError extends Error {

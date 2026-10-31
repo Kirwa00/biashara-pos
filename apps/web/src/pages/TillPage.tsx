@@ -42,12 +42,17 @@ export function TillPage() {
   // Data
   const products = useLoad<Product[]>(`/products?limit=500${search ? `&q=${encodeURIComponent(search)}` : ""}`, [], search ? undefined : cacheKey("products"));
   const customers = useLoad<Customer[]>("/customers", [], cacheKey("customers"));
-  const shift = useLoad<Shift | null>("/shifts/current", null, cacheKey("shift"));
+  const shift = useLoad<Shift | null>("/shifts/current", null);
 
   // Offline outbox: retry on mount, when the browser comes back online, and every 20s.
   const [outbox, setOutbox] = useState(readOutbox);
+  const [syncNote, setSyncNote] = useState("");
+  const sync = () =>
+    flushOutbox().then((r) => {
+      setOutbox(readOutbox());
+      setSyncNote(r === "no-shift" ? "Open a shift to sync these sales." : r === "offline" ? "Still offline; will retry." : "");
+    });
   useEffect(() => {
-    const sync = () => flushOutbox().then(() => setOutbox(readOutbox()));
     sync();
     window.addEventListener("online", sync);
     const t = setInterval(sync, 20_000);
@@ -177,6 +182,7 @@ export function TillPage() {
       const body = {
         type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
         idempotencyKey: crypto.randomUUID(),
+        expectedTotalCents: cartTotalCents,
         customerId: selectedCustomer?.id || undefined,
         lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
         payments,
@@ -262,9 +268,9 @@ export function TillPage() {
           <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
             <div className="flex items-center justify-between gap-3">
               <span className="font-medium text-ink">
-                {outbox.filter((q) => !q.error).length} offline sale(s) waiting to sync
+                {outbox.filter((q) => !q.error).length} offline sale(s) waiting to sync {syncNote && <span className="text-muted">· {syncNote}</span>}
               </span>
-              <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => flushOutbox().then(() => setOutbox(readOutbox()))}>
+              <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={sync}>
                 Sync now
               </button>
             </div>
