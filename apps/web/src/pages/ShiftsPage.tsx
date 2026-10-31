@@ -2,6 +2,7 @@ import { formatKes, toCents } from "@kpos/shared";
 import { useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api";
+import { cashierCacheKey } from "../offline";
 import { Card, Note, useLoad } from "./ui";
 
 type MethodTaking = { method: string; amount_cents: string; count: number };
@@ -43,6 +44,7 @@ export function ShiftsPage() {
         body: JSON.stringify({ openingFloatCents: toCents(openFloat || "0") }),
       });
       setMsg("Shift opened successfully.");
+      localStorage.removeItem(cashierCacheKey("shift"));
       currentShift.reload();
       shiftList.reload();
     } catch (err) {
@@ -73,6 +75,7 @@ export function ShiftsPage() {
       );
       setCountedCash("");
       setCloseNote("");
+      localStorage.removeItem(cashierCacheKey("shift"));
       currentShift.reload();
       shiftList.reload();
     } catch (err) {

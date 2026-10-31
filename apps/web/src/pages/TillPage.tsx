@@ -182,6 +182,8 @@ export function TillPage() {
       const body = {
         type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
         idempotencyKey: crypto.randomUUID(),
+        // Credit invoices are priced by the customer's tier on the server; paid sales must match what the till charged.
+        expectedTotalCents: tenderMode === "CREDIT" ? undefined : cartTotalCents,
         customerId: selectedCustomer?.id || undefined,
         lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
         payments,
