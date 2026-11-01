@@ -25,6 +25,10 @@ async function receiveGoods(tx: Tx, a: { bid: string; sub: string; branchId: str
   return pu!;
 }
 
+/** Exact half-up cents for a 3-decimal quantity, using integer thousandths. */
+const lineCents = (qty: number, unitCostCents: number) =>
+  Number((BigInt(Math.round(qty * 1000)) * BigInt(unitCostCents) + 500n) / 1000n);
+
 const notFound = () => new HTTPException(404, { message: "Purchase order not found" });
 
 export const supplierRoutes = new Hono<AppEnv>()
@@ -101,7 +105,7 @@ export const supplierRoutes = new Hono<AppEnv>()
     const b = c.req.valid("json");
     return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
       const branchId = await resolveBranch(tx, sub, b.branchId);
-      const total = b.lines.reduce((s, l) => s + Math.round(l.quantity * l.unitCostCents), 0);
+      const total = b.lines.reduce((s, l) => s + lineCents(l.quantity, l.unitCostCents), 0);
       const [po] = await tx`INSERT INTO purchase_orders (business_id, branch_id, supplier_id, number, note, total_cents, created_by)
         VALUES (${bid}, ${branchId}, ${b.supplierId}, ${await nextNumber(tx, bid, "PO")}, ${b.note ?? null}, ${total}, ${sub}) RETURNING *`;
       for (const l of b.lines)
@@ -146,7 +150,7 @@ export const supplierRoutes = new Hono<AppEnv>()
         // Cost the receipt as the change in the line's rounded received value, so split deliveries sum to the order line total.
         const cost = Number(l.unit_cost_cents);
         const before = Number(l.quantity_received);
-        const totalCents = Math.round((before + r.quantity) * cost) - Math.round(before * cost);
+        const totalCents = lineCents(before + r.quantity, cost) - lineCents(before, cost);
         goods.push({ productId: r.productId, quantity: r.quantity, unitCostCents: cost, totalCents });
         await tx`UPDATE purchase_order_lines SET quantity_received = quantity_received + ${r.quantity} WHERE id = ${l.id}`;
       }

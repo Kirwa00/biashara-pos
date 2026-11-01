@@ -52,5 +52,14 @@ describe("purchase orders", () => {
     for (let i = 0; i < 3; i++) await post(`/v1/purchase-orders/${po3.id}/receive`, { lines: [{ productId: p.id, quantity: 0.001 }] }, t);
     const sups2 = await json<{ id: string; balance_cents: string }[]>(call("/v1/suppliers", { token: t }));
     expect(sups2.find((s) => s.id === sup2.id)?.balance_cents).toBe(po3.total_cents);
+
+    // 0.550 @ 10c = 6c; 0.071 + 0.479 sums to 0.5499999… in floats.
+    const sup3 = await json<{ id: string }>(post("/v1/suppliers", { name: "Halves Ltd" }, t));
+    const po4 = await json<{ id: string; total_cents: string }>(post("/v1/purchase-orders", { supplierId: sup3.id, lines: [{ productId: p.id, quantity: 0.55, unitCostCents: 10 }] }, t));
+    expect(po4.total_cents).toBe("6");
+    await post(`/v1/purchase-orders/${po4.id}/approve`, {}, t);
+    for (const q of [0.071, 0.479]) await post(`/v1/purchase-orders/${po4.id}/receive`, { lines: [{ productId: p.id, quantity: q }] }, t);
+    const sups3 = await json<{ id: string; balance_cents: string }[]>(call("/v1/suppliers", { token: t }));
+    expect(sups3.find((s) => s.id === sup3.id)?.balance_cents).toBe("6");
   });
 });
