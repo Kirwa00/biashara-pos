@@ -28,8 +28,8 @@ export async function postMovement(tx: Tx, m: Movement) {
   }
   const inbound = m.quantity > 0 && m.unitCostCents !== undefined;
   const newAvg = inbound ? weightedAvgCost(onHand, avg, m.quantity, m.unitCostCents!) : avg;
-  await tx`INSERT INTO stock_movements (business_id, branch_id, product_id, type, quantity, unit_cost_cents, balance_after, reason, ref_type, ref_id, created_by)
-    VALUES (${m.businessId}, ${m.branchId}, ${m.productId}, ${m.type}, ${m.quantity}, ${inbound ? m.unitCostCents! : avg}, ${after},
+  await tx`INSERT INTO stock_movements (business_id, branch_id, product_id, type, quantity, unit_cost_cents, balance_after, avg_cost_after, reason, ref_type, ref_id, created_by)
+    VALUES (${m.businessId}, ${m.branchId}, ${m.productId}, ${m.type}, ${m.quantity}, ${inbound ? m.unitCostCents! : avg}, ${after}, ${newAvg},
             ${m.reason ?? null}, ${m.refType ?? null}, ${m.refId ?? null}, ${m.userId})`;
   await tx`UPDATE stock_balances SET on_hand = ${after}, avg_cost_cents = ${newAvg}, updated_at = now()
     WHERE business_id = ${m.businessId} AND branch_id = ${m.branchId} AND product_id = ${m.productId}`;
