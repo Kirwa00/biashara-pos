@@ -9,6 +9,8 @@ type Summary = { from: string; to: string; sales: { count: number; total_cents: 
 const EXPORTS = ["products", "customers", "suppliers", "documents", "document_lines", "payments", "purchases", "supplier_payments", "expenses", "stock_movements", "shifts"];
 type Breakdown = { key: string; label: string; quantity: string; total_cents: string; gross_profit_cents: string };
 type Valuation = { as_of: string; total_cents: string; categories: { category: string; value_cents: string }[]; products: { id: string; sku: string; name: string; category: string; on_hand: string; avg_cost_cents: string; value_cents: string }[] };
+type Statement = { period: string; sales_cents: string; returns_cents: string; net_sales_cents: string; cogs_cents: string; gross_profit_cents: string; expenses: Record<string, string>; expenses_cents: string; net_profit_cents: string };
+type Pnl = { from: string; to: string; months: Statement[]; total: Statement };
 type Expense = { id: string; category: string; description: string | null; amount_cents: string; method: string; expense_date: string };
 
 export function ReportsPage() {
@@ -22,6 +24,25 @@ export function ReportsPage() {
   const [asOf, setAsOf] = useState("");
   const valuation = useLoad<Valuation | null>(`/reports/stock-valuation${asOf ? `?asOf=${asOf}` : ""}`, null);
   const v = valuation.data;
+  const pnl = useLoad<Pnl | null>(`/reports/pnl?from=${range.from}&to=${range.to}`, null);
+  const pl = pnl.data;
+  const plCols = pl ? [...pl.months, pl.total] : [];
+  const plRows: [string, (st: Statement) => string, boolean?][] = pl ? [
+    ["Sales (net of VAT)", (st) => st.sales_cents], ["Less returns", (st) => st.returns_cents], ["Net sales", (st) => st.net_sales_cents, true],
+    ["Cost of goods sold", (st) => st.cogs_cents], ["Gross profit", (st) => st.gross_profit_cents, true],
+    ...Object.keys(pl.total.expenses).sort().map((k) => [`Expense: ${k}`, (st: Statement) => st.expenses[k] ?? "0"] as [string, (st: Statement) => string]),
+    ["Total expenses", (st) => st.expenses_cents], ["Net profit", (st) => st.net_profit_cents, true],
+  ] : [];
+  function downloadPnl() {
+    const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const csv = [["Line", ...plCols.map((st) => st.period)], ...plRows.map(([label, get]) => [label, ...plCols.map((st) => (Number(get(st)) / 100).toFixed(2))])]
+      .map((row) => row.map(cell).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    a.download = `PnL_${range.from}_${range.to}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
   const expenses = useLoad<Expense[]>(`/expenses?from=${range.from}&to=${range.to}`, []);
   async function addExpense(e: React.FormEvent<HTMLFormElement>) {
     const form = e.currentTarget;
@@ -77,6 +98,20 @@ export function ReportsPage() {
           ) : <p className="text-sm text-muted">No sales in this period.</p>}
         </Card>
       </>)}
+      <Card title="Profit & loss (net of VAT)">
+        <Note msg={pnl.msg} />
+        {pl && (pl.months.length ? (<>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-muted"><tr><th className="py-1">Line</th>{plCols.map((st) => <th key={st.period} className="text-right">{st.period === "TOTAL" ? "Total" : st.period}</th>)}</tr></thead>
+              <tbody>{plRows.map(([label, get, bold]) => (
+                <tr key={label} className={`border-t border-line ${bold ? "font-semibold" : ""}`}><td className="py-2">{label}</td>{plCols.map((st) => <td key={st.period} className="num text-right">{formatKes(Number(get(st)))}</td>)}</tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <button className="btn-primary mt-3" onClick={downloadPnl}>Download CSV</button>
+        </>) : <p className="text-sm text-muted">No sales or expenses in this period.</p>)}
+      </Card>
       <Card title="Stock valuation (at average cost)">
         <div className="mb-3 flex items-center gap-2 text-sm">
           <span className="text-muted">As at</span>

@@ -46,6 +46,40 @@ export const reportRoutes = new Hono<AppEnv>()
       };
     }));
   })
+  /** Profit & loss by month (net of VAT): sales, returns, cost of goods sold, gross profit, expenses by category, net profit. */
+  .get("/reports/pnl", requirePermission("reports.view"), async (c) => {
+    const { from, to } = range((k) => c.req.query(k));
+    if (from > to) throw new HTTPException(400, { message: "from must be on or before to" });
+    return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
+      const trade = await tx`SELECT to_char(d.issue_date, 'YYYY-MM') AS month,
+          coalesce(sum(l.net_cents) FILTER (WHERE d.type <> 'CREDIT_NOTE'), 0) AS sales,
+          coalesce(sum(l.net_cents) FILTER (WHERE d.type = 'CREDIT_NOTE'), 0) AS returns,
+          coalesce(sum(round(l.unit_cost_cents * l.quantity) * CASE WHEN d.type = 'CREDIT_NOTE' THEN -1 ELSE 1 END), 0) AS cogs
+        FROM document_lines l JOIN documents d ON d.id = l.document_id
+        WHERE d.type IN ('INVOICE','SALE','CREDIT_NOTE') AND d.issue_date BETWEEN ${from} AND ${to} GROUP BY 1`;
+      const spend = await tx`SELECT to_char(expense_date, 'YYYY-MM') AS month, category, sum(amount_cents) AS amount
+        FROM expenses WHERE expense_date BETWEEN ${from} AND ${to} GROUP BY 1, 2`;
+      const blank = () => ({ sales: 0, returns: 0, cogs: 0, expenses: {} as Record<string, number> });
+      const months = new Map<string, ReturnType<typeof blank>>();
+      const at = (m: string) => months.get(m) ?? months.set(m, blank()).get(m)!;
+      for (const r of trade) Object.assign(at(r.month), { sales: Number(r.sales), returns: Number(r.returns), cogs: Number(r.cogs) });
+      for (const r of spend) at(r.month).expenses[r.category] = Number(r.amount);
+      const total = blank();
+      for (const m of months.values()) {
+        total.sales += m.sales; total.returns += m.returns; total.cogs += m.cogs;
+        for (const [k, v] of Object.entries(m.expenses)) total.expenses[k] = (total.expenses[k] ?? 0) + v;
+      }
+      const statement = (period: string, m: ReturnType<typeof blank>) => {
+        const net_sales = m.sales - m.returns, gross_profit = net_sales - m.cogs;
+        const expenses_total = Object.values(m.expenses).reduce((s, v) => s + v, 0);
+        const str = (n: number) => String(n);
+        return { period, sales_cents: str(m.sales), returns_cents: str(m.returns), net_sales_cents: str(net_sales), cogs_cents: str(m.cogs),
+          gross_profit_cents: str(gross_profit), expenses: Object.fromEntries(Object.entries(m.expenses).map(([k, v]) => [k, str(v)])),
+          expenses_cents: str(expenses_total), net_profit_cents: str(gross_profit - expenses_total) };
+      };
+      return { from, to, months: [...months.keys()].sort().map((k) => statement(k, months.get(k)!)), total: statement("TOTAL", total) };
+    }));
+  })
   .get("/reports/summary", requirePermission("reports.view"), async (c) => {
     const { from, to } = range((k) => c.req.query(k));
     return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
