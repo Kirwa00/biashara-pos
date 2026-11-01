@@ -8,6 +8,7 @@ type Summary = { from: string; to: string; sales: { count: number; total_cents: 
 
 const EXPORTS = ["products", "customers", "suppliers", "documents", "document_lines", "payments", "purchases", "supplier_payments", "expenses", "stock_movements", "shifts"];
 type Breakdown = { key: string; label: string; quantity: string; total_cents: string; gross_profit_cents: string };
+type Valuation = { as_of: string; total_cents: string; categories: { category: string; value_cents: string }[]; products: { id: string; sku: string; name: string; category: string; on_hand: string; avg_cost_cents: string; value_cents: string }[] };
 type Expense = { id: string; category: string; description: string | null; amount_cents: string; method: string; expense_date: string };
 
 export function ReportsPage() {
@@ -18,6 +19,9 @@ export function ReportsPage() {
   const s = r.data;
   const [by, setBy] = useState<"product" | "category" | "cashier">("product");
   const breakdown = useLoad<Breakdown[]>(`/reports/breakdown?by=${by}&from=${range.from}&to=${range.to}`, []);
+  const [asOf, setAsOf] = useState("");
+  const valuation = useLoad<Valuation | null>(`/reports/stock-valuation${asOf ? `?asOf=${asOf}` : ""}`, null);
+  const v = valuation.data;
   const expenses = useLoad<Expense[]>(`/expenses?from=${range.from}&to=${range.to}`, []);
   async function addExpense(e: React.FormEvent<HTMLFormElement>) {
     const form = e.currentTarget;
@@ -73,6 +77,28 @@ export function ReportsPage() {
           ) : <p className="text-sm text-muted">No sales in this period.</p>}
         </Card>
       </>)}
+      <Card title="Stock valuation (at average cost)">
+        <div className="mb-3 flex items-center gap-2 text-sm">
+          <span className="text-muted">As at</span>
+          <input type="date" value={asOf} max={today} onChange={(e) => setAsOf(e.target.value)} className="input max-w-44" />
+          {asOf && <button className="text-primary hover:underline" onClick={() => setAsOf("")}>Now</button>}
+        </div>
+        <Note msg={valuation.msg} />
+        {v && (<>
+          <p className="num mb-3 font-display text-2xl font-bold">{formatKes(Number(v.total_cents))}</p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {v.categories.map((c) => <span key={c.category} className="rounded-lg bg-surface px-3 py-1 text-sm">{c.category}: <span className="num font-semibold">{formatKes(Number(c.value_cents))}</span></span>)}
+          </div>
+          {v.products.length ? (
+            <table className="w-full text-left text-sm">
+              <thead className="text-muted"><tr><th className="py-1">Product</th><th>Category</th><th className="text-right">On hand</th><th className="text-right">Avg cost</th><th className="text-right">Value</th></tr></thead>
+              <tbody>{v.products.map((p) => (
+                <tr key={p.id} className="border-t border-line"><td className="py-2">{p.name} <span className="text-xs text-muted">{p.sku}</span></td><td>{p.category}</td><td className="num text-right">{Number(p.on_hand)}</td><td className="num text-right">{formatKes(Number(p.avg_cost_cents))}</td><td className="num text-right">{formatKes(Number(p.value_cents))}</td></tr>
+              ))}</tbody>
+            </table>
+          ) : <p className="text-sm text-muted">No stock on hand.</p>}
+        </>)}
+      </Card>
       <Card title="Operating expenses">
         <Note msg={expenses.msg} />
         <form onSubmit={addExpense} className="mb-4 grid gap-2 md:grid-cols-6">

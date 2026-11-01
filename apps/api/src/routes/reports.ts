@@ -22,6 +22,30 @@ const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name,
 
 export const reportRoutes = new Hono<AppEnv>()
   .use(requireAuth)
+  /** Stock at average cost: current balances, or replayed from the ledger as at the end of `asOf` (Nairobi date). */
+  .get("/reports/stock-valuation", requirePermission("reports.view"), async (c) => {
+    const asOf = c.req.query("asOf");
+    if (asOf !== undefined && !isIsoDate(asOf)) throw new HTTPException(400, { message: "asOf must be YYYY-MM-DD" });
+    return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
+      const src = asOf
+        ? tx`SELECT product_id, sum(balance_after) AS qty, sum(balance_after * coalesce(avg_cost_after, unit_cost_cents)) AS value FROM (
+            SELECT DISTINCT ON (branch_id, product_id) branch_id, product_id, balance_after, avg_cost_after, unit_cost_cents FROM stock_movements
+            WHERE (created_at AT TIME ZONE 'Africa/Nairobi')::date <= ${asOf} ORDER BY branch_id, product_id, created_at DESC, id DESC) last GROUP BY product_id`
+        : tx`SELECT product_id, sum(on_hand) AS qty, sum(on_hand * avg_cost_cents) AS value FROM stock_balances GROUP BY product_id`;
+      const products = await tx`SELECT p.id, p.sku, p.name, coalesce(cat.name, 'Uncategorised') AS category, s.qty AS on_hand,
+          round(s.value) AS value_cents, CASE WHEN s.qty <> 0 THEN round(s.value / s.qty) ELSE 0 END AS avg_cost_cents
+        FROM (${src}) s JOIN products p ON p.id = s.product_id LEFT JOIN categories cat ON cat.id = p.category_id
+        WHERE (s.qty <> 0 OR round(s.value) <> 0) ${asOf ? tx`` : tx`AND p.is_active AND p.track_stock`} ORDER BY round(s.value) DESC, p.name`;
+      const byCat = new Map<string, number>();
+      for (const p of products) byCat.set(p.category, (byCat.get(p.category) ?? 0) + Number(p.value_cents));
+      return {
+        as_of: asOf ?? nairobiToday(),
+        total_cents: String(products.reduce((s, p) => s + Number(p.value_cents), 0)),
+        categories: [...byCat].map(([category, v]) => ({ category, value_cents: String(v) })).sort((a, b) => Number(b.value_cents) - Number(a.value_cents)),
+        products,
+      };
+    }));
+  })
   .get("/reports/summary", requirePermission("reports.view"), async (c) => {
     const { from, to } = range((k) => c.req.query(k));
     return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
