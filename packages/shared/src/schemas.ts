@@ -190,3 +190,18 @@ export const kraCodesSchema = z.object({
   pkgUnitCode: z.string().min(1).max(5).default("NT"),
 });
 export type KraCodesInput = z.infer<typeof kraCodesSchema>;
+
+/** Move stock from one branch to another; nothing changes until it is sent. */
+export const transferSchema = z.object({
+  fromBranchId: z.string().uuid(),
+  toBranchId: z.string().uuid(),
+  note: z.string().trim().max(200).optional(),
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") })).min(1).max(500)
+    .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once per transfer"),
+}).refine((t) => t.fromBranchId !== t.toBranchId, "Pick two different branches");
+
+/** Quantities that actually arrived; omit to accept everything that was sent. */
+export const transferReceiveSchema = z.object({
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n >= 0, "Cannot be negative") })).max(500)
+    .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once").optional(),
+});

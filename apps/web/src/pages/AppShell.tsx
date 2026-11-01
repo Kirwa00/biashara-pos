@@ -22,6 +22,7 @@ const NAV = [
   { to: "/sales", label: "Sales & Invoices" },
   { to: "/returns", label: "Returns & Credit Notes" },
   { to: "/inventory", label: "Stock & Movements" },
+  { to: "/transfers", label: "Branch Transfers" },
   { to: "/suppliers", label: "Suppliers & GRNs" },
   { to: "/purchase-orders", label: "Purchase Orders" },
   { to: "/reports", label: "Financial Reports" },

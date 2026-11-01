@@ -25,6 +25,7 @@ const ReceiptPage = page(() => import("./pages/ReceiptPage"), "ReceiptPage");
 const DocumentPrintPage = page(() => import("./pages/DocumentPrintPage"), "DocumentPrintPage");
 const RemindersPage = page(() => import("./pages/RemindersPage"), "RemindersPage");
 const NotificationsPage = page(() => import("./pages/NotificationsPage"), "NotificationsPage");
+const TransfersPage = page(() => import("./pages/TransfersPage"), "TransfersPage");
 const ShiftsPage = page(() => import("./pages/ShiftsPage"), "ShiftsPage");
 const ReturnsPage = page(() => import("./pages/ReturnsPage"), "ReturnsPage");
 const EtimsPage = page(() => import("./pages/EtimsPage"), "EtimsPage");
@@ -81,6 +82,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="sales" element={<InvoicesPage />} />
           <Route path="returns" element={<ReturnsPage />} />
           <Route path="inventory" element={<InventoryPage />} />
+          <Route path="transfers" element={<TransfersPage />} />
           <Route path="suppliers" element={<SuppliersPage />} />
           <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="reports" element={<ReportsPage />} />
