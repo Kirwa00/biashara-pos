@@ -20,6 +20,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("prototype flows", () => {
   it("sells, invoices, receives stock, takes M-Pesa via PayHero and reports", async () => {
     const t = (await json<{ accessToken: string }>(post("/v1/auth/register", { businessName: "proto", ownerName: "Owner", email: `proto-${run}@p.ke`, phone: "0712345678", password: "correct-horse-1" }, ""))).accessToken;
+    expect((await post("/v1/shifts/open", { openingFloatCents: 0 }, t)).status).toBe(201);
     const p = await json<{ id: string }>(post("/v1/products", { sku: "SUGAR", name: "Sugar 1kg", retailPriceCents: 20000, wholesalePriceCents: 18000, wholesaleMinQty: 10, reorderLevel: 2 }, t));
     const sup = await json<{ id: string }>(post("/v1/suppliers", { name: "Mumias Distributors" }, t));
     expect((await post("/v1/purchases", { supplierId: sup.id, lines: [{ productId: p.id, quantity: 20, unitCostCents: 15000 }] }, t)).status).toBe(201);
@@ -49,6 +50,7 @@ describe("prototype flows", () => {
     const stk = await json<{ paymentId: string }>(post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 100000 }, t));
     const sent = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
     expect(sent).toMatchObject({ amount: 1000, phone_number: "254712345678", channel_id: 123, external_reference: stk.paymentId });
+    expect((await post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 100000 }, t)).status).toBe(422);
 
     const hook = new URL(settings.callbackUrl).pathname;
     expect((await call("/v1/webhooks/payhero/not-a-token", { method: "POST", body: "{}" })).status).toBe(404);
@@ -66,6 +68,7 @@ describe("prototype flows", () => {
 
   it("auto-confirms hand-entered M-Pesa codes only when PayHero reports that code for the exact amount", async () => {
     const t = (await json<{ accessToken: string }>(post("/v1/auth/register", { businessName: "codes", ownerName: "Owner", email: `codes-${run}@p.ke`, phone: "0712345678", password: "correct-horse-1" }, ""))).accessToken;
+    expect((await post("/v1/shifts/open", { openingFloatCents: 0 }, t)).status).toBe(201);
     const p = await json<{ id: string }>(post("/v1/products", { sku: "SALT", name: "Salt", retailPriceCents: 5000, trackStock: false }, t));
     const sale = (code: string) => post("/v1/documents", { type: "SALE", lines: [{ productId: p.id, quantity: 1 }], payments: [{ method: "MPESA", amountCents: 5000, reference: code }] }, t);
     expect((await sale("nopayhero1")).status).toBe(201); // no PayHero: manual fallback

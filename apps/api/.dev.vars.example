@@ -1,2 +1,4 @@
 DATABASE_URL=postgres://kpos_app:app@localhost:5432/kenya_pos
 JWT_SECRET=change-me-to-32-random-bytes
+# Encrypts stored PayHero passwords; required before saving payment settings.
+ENCRYPTION_KEY=change-me-to-32-random-bytes

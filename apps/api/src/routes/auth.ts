@@ -64,7 +64,9 @@ export const authRoutes = new Hono<AppEnv>()
     const [t] = await sql`SELECT * FROM refresh_lookup(${await sha256(refreshToken)})`;
     if (!t) throw new HTTPException(401, { message: "Session expired" });
     return withTenant(sql, t.business_id, async (tx) => {
-      await tx`UPDATE refresh_tokens SET revoked_at = now() WHERE id = ${t.id}`;
+      // Only the request that actually revokes the token may rotate it; a concurrent replay finds it already revoked.
+      const [rotated] = await tx`UPDATE refresh_tokens SET revoked_at = now() WHERE id = ${t.id} AND revoked_at IS NULL RETURNING id`;
+      if (!rotated) throw new HTTPException(401, { message: "Session expired" });
       const [u] = await tx`SELECT id, role, is_active FROM users WHERE id = ${t.user_id}`;
       if (!u?.is_active) throw new HTTPException(401, { message: "Session expired" });
       return c.json(await issueTokens(tx, c.env.JWT_SECRET, { id: u.id, businessId: t.business_id, role: u.role }));

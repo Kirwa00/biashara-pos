@@ -52,6 +52,10 @@ describe("tenant isolation", () => {
     expect(refreshed.status).toBe(200);
     const reuse = await call("/v1/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken: t.refreshToken }) });
     expect(reuse.status).toBe(401);
+    // Two simultaneous refreshes with the same token: exactly one may rotate it.
+    const { refreshToken } = (await refreshed.json()) as { refreshToken: string };
+    const race = await Promise.all([0, 1].map(() => call("/v1/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }) })));
+    expect(race.map((r) => r.status).sort()).toEqual([200, 401]);
     for (let i = 0; i < 5; i++) {
       await call("/v1/auth/login", { method: "POST", body: JSON.stringify({ email: `gamma-${run}@test.ke`, password: "wrong" }) });
     }

@@ -14,8 +14,12 @@ const call = (path: string, init: RequestInit & { token?: string } = {}) =>
 const send = (method: string, path: string, body: unknown, token: string) => call(path, { method, body: JSON.stringify(body), token });
 const post = (path: string, body: unknown, token: string) => send("POST", path, body, token);
 const json = async <T = Record<string, unknown>>(r: Response | Promise<Response>) => (await (await r).json()) as T;
-const register = async (tag: string) =>
-  (await json<{ accessToken: string }>(post("/v1/auth/register", { businessName: tag, ownerName: "Owner", email: `${tag}-${run}@p.ke`, phone: "0712345678", password: "correct-horse-1" }, ""))).accessToken;
+/** Registers a business and opens the owner's till shift, which till sales need. */
+const register = async (tag: string) => {
+  const t = (await json<{ accessToken: string }>(post("/v1/auth/register", { businessName: tag, ownerName: "Owner", email: `${tag}-${run}@p.ke`, phone: "0712345678", password: "correct-horse-1" }, ""))).accessToken;
+  expect((await post("/v1/shifts/open", { openingFloatCents: 0 }, t)).status).toBe(201);
+  return t;
+};
 const stubPayhero = (body: (ref: string) => BodyInit) =>
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(body(new URL(url).searchParams.get("reference") ?? ""))));
 
@@ -74,5 +78,37 @@ describe("frame follow-ups", () => {
     const c = await json<{ id: string }>(post("/v1/customers", { name: "Duka Wholesale", priceTier: "WHOLESALE" }, t));
     const res = await post("/v1/documents", { type: "SALE", customerId: c.id, expectedTotalCents: 9000, lines: [{ productId: p.id, quantity: 1 }], payments: [{ method: "CASH", amountCents: 9000 }] }, t);
     expect(res.status).toBe(201);
+  });
+
+  it("a waiting M-Pesa prompt reserves the balance; a late confirmation never overpays", async () => {
+    const t = await register("stkx");
+    const p = await json<{ id: string }>(post("/v1/products", { sku: "SALT", name: "Salt", retailPriceCents: 5000, trackStock: false }, t));
+    const cust = await json<{ id: string }>(post("/v1/customers", { name: "Duka Prompt", creditLimitCents: 1000000 }, t));
+    const inv = await json<{ id: string; total_cents: string }>(post("/v1/documents", { type: "INVOICE", customerId: cust.id, lines: [{ productId: p.id, quantity: 2 }] }, t));
+    expect(inv.total_cents).toBe("10000");
+    expect((await send("PUT", "/v1/settings/payments", { username: "ph-user", password: "ph-secret", channelId: 123 }, t)).status).toBe(200);
+    const { callbackUrl } = await json<{ callbackUrl: string }>(call("/v1/settings/payments", { token: t }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("transaction-status")
+      ? { status: "SUCCESS", provider_reference: `S${run}`, amount: 100, reference: "PH-STK-X" } : { success: true, reference: "PH-STK-X" }))));
+
+    const stk = await json<{ paymentId: string }>(post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 10000 }, t));
+    expect((await post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 10000 }, t)).status).toBe(422);
+    // The cashier gives up on the prompt and takes a bank transfer; then the customer approves the prompt anyway.
+    expect((await post(`/v1/documents/${inv.id}/payments`, { method: "BANK", amountCents: 10000, reference: "EFT-STK" }, t)).status).toBe(201);
+    expect((await call(new URL(callbackUrl).pathname, { method: "POST", body: JSON.stringify({ response: { ExternalReference: stk.paymentId } }) })).status).toBe(200);
+    expect(await json(call(`/v1/payments/${stk.paymentId}`, { token: t }))).toMatchObject({ status: "PENDING" });
+    expect(await json(call(`/v1/documents/${inv.id}`, { token: t }))).toMatchObject({ status: "PAID", paid_cents: "10000" });
+  });
+
+  it("till sales and cash refunds need an open shift", async () => {
+    const t = (await json<{ accessToken: string }>(post("/v1/auth/register", { businessName: "noshift", ownerName: "Owner", email: `noshift-${run}@p.ke`, phone: "0712345678", password: "correct-horse-1" }, ""))).accessToken;
+    const p = await json<{ id: string }>(post("/v1/products", { sku: "TEA", name: "Tea", retailPriceCents: 3000, trackStock: false }, t));
+    const sale = () => post("/v1/documents", { type: "SALE", lines: [{ productId: p.id, quantity: 1 }], payments: [{ method: "CASH", amountCents: 3000 }] }, t);
+    expect((await sale()).status).toBe(409);
+    const shift = await json<{ id: string }>(post("/v1/shifts/open", { openingFloatCents: 0 }, t));
+    const s = await json<{ id: string }>(sale());
+    expect((await post(`/v1/shifts/${shift.id}/close`, { countedCashCents: 3000 }, t)).status).toBe(200);
+    expect((await post(`/v1/documents/${s.id}/return`, { reason: "Spilled" }, t)).status).toBe(409);
+    expect((await post(`/v1/documents/${s.id}/return`, { reason: "Spilled", method: "BANK", reference: "EFT-RF1" }, t)).status).toBe(201);
   });
 });

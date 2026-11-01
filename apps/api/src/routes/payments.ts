@@ -5,13 +5,30 @@ import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
 import { decryptSecret, encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
-import type { AppEnv } from "../env";
+import type { AppEnv, Env } from "../env";
+import type postgres from "postgres";
 import { amountShillings, sameChannel, base, key, payheroGet, type TxStatus } from "../payhero";
 import { applyPayment } from "./documents";
 import { currentShiftId } from "./shifts";
 
 const basic = (u: string, p: string) => `Basic ${btoa(`${u}:${p}`)}`;
 const toPhone254 = (p: string) => p.replace(/^\+/, "").replace(/^0/, "254");
+/** A prompt waiting longer than this is re-checked with PayHero before a new prompt may claim its amount. */
+const STK_WAIT = "3 minutes";
+
+/** Pending prompts keep their amount reserved until PayHero reports them FAILED; an unreachable PayHero keeps the reservation. */
+async function releaseFailedPrompts(env: Env, sql: postgres.Sql, bid: string, documentId: string) {
+  const { stale, s } = await withTenant(sql, bid, async (tx) => ({
+    stale: await tx`SELECT id, provider_ref FROM payments WHERE document_id = ${documentId} AND status = 'PENDING'
+      AND provider_ref IS NOT NULL AND created_at <= now() - ${STK_WAIT}::interval`,
+    s: (await tx`SELECT * FROM payment_settings`)[0],
+  }));
+  if (!s) return;
+  for (const p of stale) {
+    const st = await payheroGet<TxStatus>(env, s, `/api/v2/transaction-status?reference=${encodeURIComponent(p.provider_ref)}`);
+    if (st?.status === "FAILED") await withTenant(sql, bid, (tx) => tx`UPDATE payments SET status = 'FAILED' WHERE id = ${p.id} AND status = 'PENDING'`);
+  }
+}
 
 /** Business-scoped PayHero settings and STK push. */
 export const paymentRoutes = new Hono<AppEnv>()
@@ -38,12 +55,17 @@ export const paymentRoutes = new Hono<AppEnv>()
     const { sub, bid } = c.get("auth");
     const b = c.req.valid("json");
     const sql = c.get("sql");
+    await releaseFailedPrompts(c.env, sql, bid, b.documentId);
     const { pay, s } = await withTenant(sql, bid, async (tx) => {
       const [s] = await tx`SELECT * FROM payment_settings`;
       if (!s) throw new HTTPException(409, { message: "PayHero is not set up for this business" });
-      const [doc] = await tx`SELECT * FROM documents WHERE id = ${b.documentId} AND type <> 'QUOTE'`;
+      // Row lock serialises prompts for one invoice so two can't both claim the same balance.
+      const [doc] = await tx`SELECT * FROM documents WHERE id = ${b.documentId} AND type <> 'QUOTE' FOR UPDATE`;
       if (!doc) throw new HTTPException(404, { message: "Invoice not found" });
-      if (b.amountCents > Number(doc.total_cents) - Number(doc.paid_cents)) throw new HTTPException(422, { message: "Amount exceeds balance" });
+      const [w] = await tx`SELECT coalesce(sum(amount_cents), 0) AS cents FROM payments
+        WHERE document_id = ${doc.id} AND status = 'PENDING' AND (provider_ref IS NOT NULL OR created_at > now() - ${STK_WAIT}::interval)`;
+      if (b.amountCents > Number(doc.total_cents) - Number(doc.paid_cents) - Number(w!.cents))
+        throw new HTTPException(422, { message: Number(w!.cents) ? "Amount exceeds balance: an M-Pesa prompt for this invoice is still waiting" : "Amount exceeds balance" });
       const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, status, phone, created_by)
         VALUES (${bid}, ${doc.id}, 'MPESA', ${b.amountCents}, 'PENDING', ${toPhone254(b.phone)}, ${sub}) RETURNING id`;
       return { pay: pay!, s };
@@ -76,21 +98,34 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
   const body = (await c.req.json().catch(() => ({}))) as { response?: { ExternalReference?: string } };
   const ref = body.response?.ExternalReference;
   if (!ref || !/^[0-9a-f-]{36}$/i.test(ref)) return c.json({ ok: true });
-  await withTenant(sql, row.bid as string, async (tx) => {
-    const [pay] = await tx`SELECT * FROM payments WHERE id = ${ref} AND status = 'PENDING' FOR UPDATE`;
-    if (!pay?.provider_ref) return;
+  const bid = row.bid as string;
+  // Ask PayHero outside any transaction so a slow reply never holds payment or invoice row locks.
+  const found = await withTenant(sql, bid, async (tx) => {
+    const [pay] = await tx`SELECT * FROM payments WHERE id = ${ref} AND status = 'PENDING'`;
     const [s] = await tx`SELECT * FROM payment_settings`;
-    const st = await payheroGet<TxStatus>(c.env, s!, `/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`);
-    if (!st) return;
-    const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id && sameChannel(s!, st.channel_id);
+    return pay?.provider_ref && s ? { pay, s } : null;
+  });
+  if (!found) return c.json({ ok: true });
+  const { pay, s } = found;
+  const st = await payheroGet<TxStatus>(c.env, s, `/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`);
+  if (!st) return c.json({ ok: true });
+  const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id && sameChannel(s, st.channel_id);
+  const amount = st.status === "SUCCESS" && sameTx && st.provider_reference ? await amountShillings(c.env, s, st) : undefined;
+  await withTenant(sql, bid, async (tx) => {
+    const [still] = await tx`SELECT id FROM payments WHERE id = ${pay.id} AND status = 'PENDING' FOR UPDATE`;
+    if (!still) return; // a concurrent callback already settled it
     if (st.status === "SUCCESS") {
-      const amount = sameTx && st.provider_reference ? await amountShillings(c.env, s!, st) : undefined;
       if (amount === undefined || Math.round(amount * 100) !== Number(pay.amount_cents)) return;
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${pay.document_id} FOR UPDATE`;
+      if (Number(pay.amount_cents) > Number(doc!.total_cents) - Number(doc!.paid_cents)) {
+        // The customer paid, but the invoice was settled another way meanwhile: keep it pending and flag it for a refund instead of failing the callback.
+        await audit(tx, { businessId: bid, action: "payment.mpesa.unapplied", entity: "payment", entityId: pay.id, after: st });
+        return;
+      }
       await applyPayment(tx, doc!, Number(pay.amount_cents));
       // Shift is assigned at confirmation so a closed shift's Z totals never change; late confirmations land on the cashier's next open shift.
       await tx`UPDATE payments SET status = 'CONFIRMED', reference = ${st.provider_reference!.toUpperCase()}, shift_id = ${currentShiftId(tx, pay.created_by)} WHERE id = ${pay.id}`;
-      await audit(tx, { businessId: row.bid as string, action: "payment.mpesa.confirmed", entity: "payment", entityId: pay.id, after: st });
+      await audit(tx, { businessId: bid, action: "payment.mpesa.confirmed", entity: "payment", entityId: pay.id, after: st });
     } else if (st.status === "FAILED") {
       await tx`UPDATE payments SET status = 'FAILED' WHERE id = ${pay.id}`;
     }
