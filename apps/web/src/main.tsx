@@ -18,6 +18,7 @@ import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { TillPage } from "./pages/TillPage";
 import { ReceiptPage } from "./pages/ReceiptPage";
+import { DocumentPrintPage } from "./pages/DocumentPrintPage";
 import { ShiftsPage } from "./pages/ShiftsPage";
 import { ReturnsPage } from "./pages/ReturnsPage";
 import { EtimsPage } from "./pages/EtimsPage";
@@ -41,6 +42,14 @@ createRoot(document.getElementById("root")!).render(
           element={
             <Protected>
               <ReceiptPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/print/:id"
+          element={
+            <Protected>
+              <DocumentPrintPage />
             </Protected>
           }
         />

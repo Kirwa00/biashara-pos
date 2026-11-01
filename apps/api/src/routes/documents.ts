@@ -115,7 +115,8 @@ export const documentRoutes = new Hono<AppEnv>()
       ORDER BY d.created_at DESC LIMIT 200`));
   })
   .get("/documents/:id", async (c) => c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
-    const [doc] = await tx`SELECT d.*, cu.name AS customer_name, cu.kra_pin AS customer_kra_pin FROM documents d LEFT JOIN customers cu ON cu.id = d.customer_id WHERE d.id = ${c.req.param("id")}`;
+    const [doc] = await tx`SELECT d.*, cu.name AS customer_name, cu.kra_pin AS customer_kra_pin, cu.phone AS customer_phone, src.type AS source_type, src.number AS source_number
+      FROM documents d LEFT JOIN customers cu ON cu.id = d.customer_id LEFT JOIN documents src ON src.id = d.source_id WHERE d.id = ${c.req.param("id")}`;
     if (!doc) throw new HTTPException(404, { message: "Document not found" });
     return { ...doc, lines: await tx`SELECT * FROM document_lines WHERE document_id = ${doc.id} ORDER BY id`, payments: await tx`SELECT * FROM payments WHERE document_id = ${doc.id} ORDER BY created_at` };
   })))
