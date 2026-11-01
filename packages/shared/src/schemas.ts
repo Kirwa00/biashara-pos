@@ -13,6 +13,12 @@ export const registerSchema = z.object({
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+/** Owners change a team member's role or switch them off; switching off ends their sessions. */
+export const updateUserSchema = z.object({
+  role: z.enum(["MANAGER", "ACCOUNTANT", "CASHIER"]).optional(),
+  isActive: z.boolean().optional(),
+}).refine((v) => v.role !== undefined || v.isActive !== undefined, "Nothing to change");
+
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export type LoginInput = z.infer<typeof loginSchema>;
 

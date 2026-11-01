@@ -3,6 +3,7 @@ import type postgres from "postgres";
 import { decryptSecret } from "./crypto";
 import { withTenant } from "./db";
 import type { Env } from "./env";
+import { key } from "./payhero";
 import { nextNumber } from "./routes/documents";
 
 type Tx = postgres.TransactionSql;
@@ -89,7 +90,7 @@ export async function processEtimsQueue(env: Env, sql: postgres.Sql, opts: { bus
       if (!s) continue;
       result.businesses++;
       const adapter = opts.adapter ?? new OscuAdapter(env.ETIMS_BASE_URL ?? OSCU_URLS[s.environment as keyof typeof OSCU_URLS],
-        { tin: s.tin, bhfId: s.bhf_id, cmcKey: await decryptSecret(env.ENCRYPTION_KEY ?? "", s.cmc_key_enc) });
+        { tin: s.tin, bhfId: s.bhf_id, cmcKey: await decryptSecret(key(env), s.cmc_key_enc) });
       for (let i = 0; i < (opts.limit ?? 50); i++) {
         const claimed = await withTenant(sql, bid, async (tx) => {
           const [sub] = await tx`UPDATE etims_submissions SET next_attempt_at = now() + interval '10 minutes', updated_at = now()

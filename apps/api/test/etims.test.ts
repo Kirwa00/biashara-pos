@@ -137,5 +137,8 @@ describe("eTIMS groundwork", () => {
     expect(await json(call("/v1/etims/reconciliation", { token: other.t }))).toMatchObject({ documents: 0, issues: [] });
     expect((await post(`/v1/etims/submissions/${sub3.id}/retry`, {}, other.t)).status).toBe(404);
     expect(await processEtimsQueue(env, sql, { businessIds: [other.bid], adapter: kra.adapter })).toMatchObject({ businesses: 0 });
+
+    // Seeded corruption stays out of jobs and the CI books check (db:verify skips suspended businesses).
+    await withTenant(sql, bid, (tx) => tx`UPDATE businesses SET status = 'SUSPENDED' WHERE id = ${bid}`);
   });
 });

@@ -1,0 +1,38 @@
+name: Nightly backup
+# 02:30 EAT. Logical dump of the production database to private R2 storage (30-day lifecycle set on the bucket).
+# Needs repository secrets: BACKUP_DATABASE_URL (direct Neon URL, not Hyperdrive), R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BACKUP_BUCKET.
+on:
+  schedule: [{ cron: "30 23 * * *" }]
+  workflow_dispatch:
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secrets
+        id: cfg
+        env: { DB: "${{ secrets.BACKUP_DATABASE_URL }}", BUCKET: "${{ secrets.R2_BACKUP_BUCKET }}" }
+        run: |
+          if [ -z "$DB" ] || [ -z "$BUCKET" ]; then echo "Backup secrets not set; skipping."; echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Install pg_dump 16
+        if: steps.cfg.outputs.skip != 'true'
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+      - name: Dump and upload
+        if: steps.cfg.outputs.skip != 'true'
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          file="kenya_pos_$(date -u +%Y-%m-%dT%H%MZ).dump"
+          /usr/lib/postgresql/16/bin/pg_dump --format=custom --no-owner --no-privileges "$BACKUP_DATABASE_URL" -f "$file"
+          test -s "$file"
+          endpoint="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          aws s3 cp "$file" "s3://${{ secrets.R2_BACKUP_BUCKET }}/daily/$file" --endpoint-url "$endpoint"
+          aws s3 cp "$file" "s3://${{ secrets.R2_BACKUP_BUCKET }}/latest.dump" --endpoint-url "$endpoint"
+          echo "Uploaded $file ($(stat -c %s "$file") bytes)"
