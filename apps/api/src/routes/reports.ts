@@ -35,7 +35,7 @@ export const reportRoutes = new Hono<AppEnv>()
       const products = await tx`SELECT p.id, p.sku, p.name, coalesce(cat.name, 'Uncategorised') AS category, s.qty AS on_hand,
           round(s.value) AS value_cents, CASE WHEN s.qty <> 0 THEN round(s.value / s.qty) ELSE 0 END AS avg_cost_cents
         FROM (${src}) s JOIN products p ON p.id = s.product_id LEFT JOIN categories cat ON cat.id = p.category_id
-        WHERE s.qty <> 0 ORDER BY round(s.value) DESC, p.name`;
+        WHERE (s.qty <> 0 OR round(s.value) <> 0) ${asOf ? tx`` : tx`AND p.is_active AND p.track_stock`} ORDER BY round(s.value) DESC, p.name`;
       const byCat = new Map<string, number>();
       for (const p of products) byCat.set(p.category, (byCat.get(p.category) ?? 0) + Number(p.value_cents));
       return {

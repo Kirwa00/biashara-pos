@@ -92,7 +92,7 @@ export function ReportsPage() {
           {v.products.length ? (
             <table className="w-full text-left text-sm">
               <thead className="text-muted"><tr><th className="py-1">Product</th><th>Category</th><th className="text-right">On hand</th><th className="text-right">Avg cost</th><th className="text-right">Value</th></tr></thead>
-              <tbody>{v.products.slice(0, 100).map((p) => (
+              <tbody>{v.products.map((p) => (
                 <tr key={p.id} className="border-t border-line"><td className="py-2">{p.name} <span className="text-xs text-muted">{p.sku}</span></td><td>{p.category}</td><td className="num text-right">{Number(p.on_hand)}</td><td className="num text-right">{formatKes(Number(p.avg_cost_cents))}</td><td className="num text-right">{formatKes(Number(p.value_cents))}</td></tr>
               ))}</tbody>
             </table>
