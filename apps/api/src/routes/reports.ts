@@ -1,10 +1,18 @@
+import { expenseSchema } from "@kpos/shared";
+import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { requireAuth, requirePermission } from "../auth";
-import { withTenant } from "../db";
+import { audit, withTenant } from "../db";
+import { resolveBranch } from "./stock";
 import type { AppEnv } from "../env";
 import type postgres from "postgres";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const nairobiToday = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+const range = (q: (k: string) => string | undefined) => {
+  const today = nairobiToday();
+  return { from: DATE.test(q("from") ?? "") ? q("from")! : today, to: DATE.test(q("to") ?? "") ? q("to")! : today };
+};
 
 /** One row per tracked product at or below its reorder level, stock summed across branches (no balance row = 0). */
 const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
@@ -15,9 +23,7 @@ const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name,
 export const reportRoutes = new Hono<AppEnv>()
   .use(requireAuth)
   .get("/reports/summary", requirePermission("reports.view"), async (c) => {
-    const today = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
-    const from = DATE.test(c.req.query("from") ?? "") ? c.req.query("from")! : today;
-    const to = DATE.test(c.req.query("to") ?? "") ? c.req.query("to")! : today;
+    const { from, to } = range((k) => c.req.query(k));
     return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
       const [sales] = await tx`SELECT count(*)::int AS count, coalesce(sum(total_cents), 0) AS total_cents, coalesce(sum(tax_cents), 0) AS tax_cents
         FROM documents WHERE type IN ('INVOICE','SALE') AND issue_date BETWEEN ${from} AND ${to}`;
@@ -33,8 +39,27 @@ export const reportRoutes = new Hono<AppEnv>()
       const [stock] = await tx`SELECT coalesce(round(sum(b.on_hand * b.avg_cost_cents)), 0) AS stock_value_cents
         FROM products p JOIN stock_balances b ON b.product_id = p.id WHERE p.is_active AND p.track_stock`;
       const [low] = await tx`SELECT count(*)::int AS low_stock FROM (${lowStock(tx)}) x`;
-      return { from, to, sales, returns, ...profit, received, ...owed, ...stock, ...low };
+      const [exp] = await tx`SELECT coalesce(sum(amount_cents), 0) AS expenses_cents FROM expenses WHERE expense_date BETWEEN ${from} AND ${to}`;
+      const [pay] = await tx`SELECT (SELECT coalesce(sum(total_cents), 0) FROM purchases) - (SELECT coalesce(sum(amount_cents), 0) FROM supplier_payments) AS payable_cents`;
+      const net_profit_cents = String(Number(profit!.gross_profit_cents) - Number(exp!.expenses_cents));
+      return { from, to, sales, returns, ...profit, ...exp, net_profit_cents, received, ...owed, ...pay, ...stock, ...low };
     }));
+  })
+  .get("/expenses", requirePermission("reports.view"), async (c) => {
+    const { from, to } = range((k) => c.req.query(k));
+    return c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) =>
+      tx`SELECT * FROM expenses WHERE expense_date BETWEEN ${from} AND ${to} ORDER BY expense_date DESC, created_at DESC LIMIT 500`));
+  })
+  .post("/expenses", requirePermission("invoices.manage"), zValidator("json", expenseSchema), async (c) => {
+    const { sub, bid } = c.get("auth");
+    const b = c.req.valid("json");
+    return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
+      const branchId = await resolveBranch(tx, sub, b.branchId);
+      const [e] = await tx`INSERT INTO expenses (business_id, branch_id, category, description, amount_cents, method, expense_date, created_by)
+        VALUES (${bid}, ${branchId}, ${b.category}, ${b.description ?? null}, ${b.amountCents}, ${b.method}, ${b.expenseDate ?? nairobiToday()}, ${sub}) RETURNING *`;
+      await audit(tx, { businessId: bid, userId: sub, action: "expense.create", entity: "expense", entityId: e!.id, after: b });
+      return e;
+    }), 201);
   })
   .get("/reports/alerts", requirePermission("reports.view"), async (c) =>
     c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => ({

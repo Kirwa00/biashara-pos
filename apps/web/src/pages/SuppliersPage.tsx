@@ -1,7 +1,7 @@
 import { formatKes, toCents } from "@kpos/shared";
 import { useState } from "react";
 import { api } from "../api";
-import { Card, Note, ProductSelect, useLoad, type Product } from "./ui";
+import { Card, Note, ProductSelect, formData, useLoad, type Product } from "./ui";
 
 type Supplier = {
   id: string;
@@ -9,6 +9,7 @@ type Supplier = {
   phone: string | null;
   email: string | null;
   kra_pin: string | null;
+  balance_cents: string;
 };
 
 type Purchase = {
@@ -75,6 +76,22 @@ export function SuppliersPage() {
       setMsg((err as Error).message);
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handlePaySupplier(e: React.FormEvent<HTMLFormElement>) {
+    const form = e.currentTarget;
+    const f = formData(e);
+    try {
+      await api(`/suppliers/${f.supplierId}/payments`, {
+        method: "POST",
+        body: JSON.stringify({ amountCents: toCents(f.amount ?? "0"), method: f.method, reference: f.reference || undefined }),
+      });
+      setMsg("Supplier payment recorded.");
+      form.reset();
+      suppliers.reload();
+    } catch (err) {
+      setMsg((err as Error).message);
     }
   }
 
@@ -265,6 +282,25 @@ export function SuppliersPage() {
               >
                 {isSubmitting ? "Posting to Ledger…" : "Post Goods Intake (GRN)"}
               </button>
+            </form>
+          </Card>
+
+          <Card title="What you owe suppliers">
+            {suppliers.data.filter((s) => Number(s.balance_cents) !== 0).map((s) => (
+              <div key={s.id} className="flex justify-between border-t border-line py-2 text-sm"><span>{s.name}</span><span className="num font-semibold">{formatKes(Number(s.balance_cents))}</span></div>
+            ))}
+            {!suppliers.data.some((s) => Number(s.balance_cents) !== 0) && <p className="text-sm text-muted">Nothing owed.</p>}
+            <form onSubmit={handlePaySupplier} className="mt-4 space-y-2">
+              <select name="supplierId" required className="input">
+                <option value="">Pay supplier…</option>
+                {suppliers.data.filter((s) => Number(s.balance_cents) > 0).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <input name="amount" required inputMode="decimal" placeholder="Amount (KES)" className="input" />
+                <select name="method" className="input">{["BANK", "MPESA", "CASH", "CARD"].map((m) => <option key={m}>{m}</option>)}</select>
+              </div>
+              <input name="reference" placeholder="Reference (optional)" className="input" />
+              <button className="btn-primary w-full">Record payment</button>
             </form>
           </Card>
 
