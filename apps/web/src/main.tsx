@@ -1,30 +1,34 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import { session } from "./api";
+import { Loading } from "./pages/ui";
+
+/** Pages load on first visit so a till on a slow line downloads only what it opens; the service worker keeps them afterwards. */
+const page = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
 import { AppShell } from "./pages/AppShell";
 import { AuthPage } from "./pages/AuthPage";
 import { LandingPage } from "./pages/LandingPage";
-import { CustomersPage } from "./pages/CustomersPage";
-import { ProductsPage } from "./pages/ProductsPage";
-import { Dashboard } from "./pages/Dashboard";
-import { TeamPage } from "./pages/TeamPage";
-import { InventoryPage } from "./pages/InventoryPage";
-import { InvoicesPage } from "./pages/InvoicesPage";
-import { PaymentsSettingsPage } from "./pages/PaymentsSettingsPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
-import { SuppliersPage } from "./pages/SuppliersPage";
-import { TillPage } from "./pages/TillPage";
-import { ReceiptPage } from "./pages/ReceiptPage";
-import { DocumentPrintPage } from "./pages/DocumentPrintPage";
-import { RemindersPage } from "./pages/RemindersPage";
-import { NotificationsPage } from "./pages/NotificationsPage";
-import { ShiftsPage } from "./pages/ShiftsPage";
-import { ReturnsPage } from "./pages/ReturnsPage";
-import { EtimsPage } from "./pages/EtimsPage";
-import { ZReportPage } from "./pages/ZReportPage";
+const CustomersPage = page(() => import("./pages/CustomersPage"), "CustomersPage");
+const ProductsPage = page(() => import("./pages/ProductsPage"), "ProductsPage");
+const Dashboard = page(() => import("./pages/Dashboard"), "Dashboard");
+const TeamPage = page(() => import("./pages/TeamPage"), "TeamPage");
+const InventoryPage = page(() => import("./pages/InventoryPage"), "InventoryPage");
+const InvoicesPage = page(() => import("./pages/InvoicesPage"), "InvoicesPage");
+const PaymentsSettingsPage = page(() => import("./pages/PaymentsSettingsPage"), "PaymentsSettingsPage");
+const ReportsPage = page(() => import("./pages/ReportsPage"), "ReportsPage");
+const PurchaseOrdersPage = page(() => import("./pages/PurchaseOrdersPage"), "PurchaseOrdersPage");
+const SuppliersPage = page(() => import("./pages/SuppliersPage"), "SuppliersPage");
+const TillPage = page(() => import("./pages/TillPage"), "TillPage");
+const ReceiptPage = page(() => import("./pages/ReceiptPage"), "ReceiptPage");
+const DocumentPrintPage = page(() => import("./pages/DocumentPrintPage"), "DocumentPrintPage");
+const RemindersPage = page(() => import("./pages/RemindersPage"), "RemindersPage");
+const NotificationsPage = page(() => import("./pages/NotificationsPage"), "NotificationsPage");
+const ShiftsPage = page(() => import("./pages/ShiftsPage"), "ShiftsPage");
+const ReturnsPage = page(() => import("./pages/ReturnsPage"), "ReturnsPage");
+const EtimsPage = page(() => import("./pages/EtimsPage"), "EtimsPage");
+const ZReportPage = page(() => import("./pages/ZReportPage"), "ZReportPage");
 
 // Signed-out visitors to "/" see the marketing page; other app routes send them to sign in.
 const Protected = ({ children }: { children: React.ReactNode }) => {
@@ -36,6 +40,7 @@ const Protected = ({ children }: { children: React.ReactNode }) => {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
+      <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
@@ -88,6 +93,9 @@ createRoot(document.getElementById("root")!).render(
           <Route path="settings/payments" element={<PaymentsSettingsPage />} />
         </Route>
       </Routes>
+      </Suspense>
     </BrowserRouter>
   </StrictMode>
 );
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));

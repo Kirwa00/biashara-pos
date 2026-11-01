@@ -14,6 +14,16 @@ export function TeamPage() {
   };
   useEffect(load, []);
 
+  async function update(u: User, change: { role?: string; isActive?: boolean }) {
+    try {
+      await api(`/users/${u.id}`, { method: "PATCH", body: JSON.stringify(change) });
+      setError("");
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function addUser(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -32,8 +42,22 @@ export function TeamPage() {
       <section className="rounded-xl border border-line bg-card p-5 lg:col-span-2">
         <h2 className="mb-4 font-display text-lg font-bold">Team</h2>
         <table className="w-full text-left text-sm">
-          <thead className="text-muted"><tr><th className="py-2">Name</th><th>Email</th><th>Role</th></tr></thead>
-          <tbody>{users.map((u) => <tr key={u.id} className="border-t border-line"><td className="py-3">{u.name}</td><td>{u.email}</td><td>{u.role}</td></tr>)}</tbody>
+          <thead className="text-muted"><tr><th className="py-2">Name</th><th>Email</th><th>Role</th><th className="text-right">Access</th></tr></thead>
+          <tbody>{users.map((u) => (
+            <tr key={u.id} className={`border-t border-line ${u.is_active ? "" : "opacity-50"}`}>
+              <td className="py-3">{u.name}</td><td>{u.email}</td>
+              <td>{u.role === "OWNER" ? u.role : (
+                <select value={u.role} onChange={(e) => update(u, { role: e.target.value })} className="rounded border border-line bg-white px-2 py-1 text-xs">
+                  {["MANAGER", "ACCOUNTANT", "CASHIER"].map((r) => <option key={r}>{r}</option>)}
+                </select>
+              )}</td>
+              <td className="text-right">{u.role !== "OWNER" && (
+                <button onClick={() => update(u, { isActive: !u.is_active })} className={`text-xs font-semibold ${u.is_active ? "text-critical" : "text-primary"} hover:underline`}>
+                  {u.is_active ? "Switch off" : "Switch on"}
+                </button>
+              )}</td>
+            </tr>
+          ))}</tbody>
         </table>
         <h3 className="mb-2 mt-6 font-display font-bold">Branches</h3>
         <ul className="text-sm">{branches.map((b) => <li key={b.id}>{b.name} <span className="text-muted">({b.code})</span></li>)}</ul>

@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
 import { audit, withTenant } from "../db";
+import { integrityReport } from "../integrity";
 import { resolveBranch } from "./stock";
 import type { AppEnv } from "../env";
 import type postgres from "postgres";
@@ -138,6 +139,9 @@ export const reportRoutes = new Hono<AppEnv>()
       return e;
     }), 201);
   })
+  /** Books check: stock ledger, document totals, payments and tax ledger all reconcile. */
+  .get("/reports/integrity", requirePermission("reports.view"), async (c) =>
+    c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => integrityReport(tx, c.get("auth").bid))))
   .get("/reports/alerts", requirePermission("reports.view"), async (c) =>
     c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => ({
       low_stock: await tx`SELECT * FROM (${lowStock(tx)}) x ORDER BY x.on_hand - x.reorder_level LIMIT 20`,

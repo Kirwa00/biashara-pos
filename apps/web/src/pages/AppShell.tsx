@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { formatKes } from "@kpos/shared";
 import { api, session } from "../api";
+import { Loading } from "./ui";
 
 type Me = {
   user: { name: string; role: string };
@@ -37,8 +38,18 @@ export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
   const [currentShift, setCurrentShift] = useState<ShiftSummary | null>(null);
   const [unread, setUnread] = useState(0);
+  const [install, setInstall] = useState<{ prompt: () => Promise<void> } | null>(null);
   const nav = useNavigate();
   const { pathname } = useLocation();
+
+  // Chrome/Edge/Android offer installation once the PWA criteria are met; we surface it as a header button.
+  useEffect(() => {
+    const offer = (e: Event) => { e.preventDefault(); setInstall(e as unknown as { prompt: () => Promise<void> }); };
+    const done = () => setInstall(null);
+    window.addEventListener("beforeinstallprompt", offer);
+    window.addEventListener("appinstalled", done);
+    return () => { window.removeEventListener("beforeinstallprompt", offer); window.removeEventListener("appinstalled", done); };
+  }, []);
 
   // Cashiers can't see notifications (403); the bell just stays at zero.
   useEffect(() => {
@@ -127,6 +138,12 @@ export function AppShell() {
               {currentShift ? `Till Shift: ${formatKes(currentShift.expected_cash_cents)}` : "No Shift Open"}
             </NavLink>
 
+            {install && (
+              <button onClick={() => install.prompt().finally(() => setInstall(null))} className="hidden sm:inline-flex rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white hover:bg-primary-active transition">
+                Install app
+              </button>
+            )}
+
             <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-ink transition">
               Alerts
               {unread > 0 && <span className="num absolute -right-1.5 -top-1.5 rounded-full bg-critical px-1.5 text-[10px] font-bold text-white">{unread}</span>}
@@ -145,7 +162,9 @@ export function AppShell() {
         </header>
 
         <main className="flex-1 p-6 overflow-y-auto">
-          <Outlet />
+          <Suspense fallback={<Loading />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

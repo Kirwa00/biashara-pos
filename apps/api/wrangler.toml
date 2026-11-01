@@ -17,3 +17,14 @@ APP_ORIGIN = "http://localhost:5173"
 # Owner email needs `wrangler secret put RESEND_API_KEY` and EMAIL_FROM (a Resend-verified sender); without them alerts stay in-app.
 [triggers]
 crons = ["0 5 * * *", "0 17 * * *", "*/15 * * * *"]
+
+# Per-IP limits (Workers Rate Limiting). namespace_id is any account-unique integer; period must be 10 or 60 seconds.
+[[ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "API_LIMITER"
+namespace_id = "1002"
+simple = { limit = 600, period = 60 }

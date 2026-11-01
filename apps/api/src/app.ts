@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { createSql } from "./db";
 import type { AppEnv } from "./env";
+import { rateLimit } from "./ratelimit";
 import { authRoutes } from "./routes/auth";
 import { businessRoutes } from "./routes/business";
 import { catalogRoutes } from "./routes/catalog";
@@ -36,6 +38,11 @@ export const app = new Hono<AppEnv>()
       }
     }
   })
+  // Brute-force targets get the tight limiter; everything else a generous per-IP ceiling (tills behind one NAT share an IP).
+  .use("/v1/auth/*", rateLimit("auth", (e) => e.AUTH_LIMITER))
+  .use("/v1/payments/stk", rateLimit("stk", (e) => e.AUTH_LIMITER))
+  .use("/v1/*", rateLimit("api", (e) => e.API_LIMITER))
+  .use("/v1/*", bodyLimit({ maxSize: 2 * 1024 * 1024, onError: (c) => c.json({ error: "Request too large" }, 413) }))
   .route("/v1/auth", authRoutes)
   .route("/v1/webhooks", webhookRoutes)
   .route("/v1", businessRoutes)
