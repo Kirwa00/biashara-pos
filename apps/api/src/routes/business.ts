@@ -6,15 +6,17 @@ import { requireAuth, requirePermission } from "../auth";
 import { hashPassword } from "../crypto";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
+import { isSuperAdmin } from "./admin";
 
 export const businessRoutes = new Hono<AppEnv>()
   .use(requireAuth)
   .get("/me", async (c) => {
-    const { sub, bid } = c.get("auth");
+    const { sub, bid, imp } = c.get("auth");
+    const superAdmin = await isSuperAdmin(c.env, c.get("sql"), c.get("auth"));
     return withTenant(c.get("sql"), bid, async (tx) => {
       const [user] = await tx`SELECT id, name, email, role, branch_id FROM users WHERE id = ${sub}`;
       const [business] = await tx`SELECT id, name, kra_pin, phone, currency, timezone, status FROM businesses WHERE id = ${bid}`;
-      return c.json({ user, business });
+      return c.json({ user, business, isSuperAdmin: superAdmin, supportSession: !!imp });
     });
   })
   .get("/branches", async (c) =>

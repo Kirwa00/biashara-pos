@@ -84,7 +84,16 @@ Everything in the code is built through S10. These are the steps only the owner 
 
 **Check:** the drill ends with `checked N businesses … all reconcile`. Neon's point-in-time restore is a second line of defence; keep it on (Launch plan or higher).
 
-## 7. Before the first pilot shop
+## 7. Platform admin (you)
+
+1. Register your own account at `https://app.<domain>/register`. Use any business name, e.g. "BiasharaPOS HQ".
+2. **Only after that account exists**, set the Worker variable `SUPER_ADMIN_EMAILS` to your email (comma-separate several). Registering first matters: until an email is registered, anyone could register it.
+3. Sign in again. **Platform Admin** appears in the sidebar:
+   - see every business, with its owner, status, users, 30-day sales and last activity;
+   - suspend or reactivate a business;
+   - "View as owner" opens a 15-minute **read-only** support view. It can't change anything or export data, and it's logged in both the platform log and the shop's own audit log.
+
+## 8. Before the first pilot shop
 
 - Register the pilot business. Add its team with the right roles; cashiers get the till only.
 - Import products (CSV), opening stock, and customers with credit limits.

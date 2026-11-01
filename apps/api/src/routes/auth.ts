@@ -9,6 +9,7 @@ import type { AppEnv } from "../env";
 import type postgres from "postgres";
 
 const MAX_FAILED = 5;
+const SUSPENDED = "This business is suspended. Contact BiasharaPOS support.";
 const LOCK_MINUTES = 15;
 
 async function issueTokens(tx: postgres.TransactionSql, secret: string, user: { id: string; businessId: string; role: Role }) {
@@ -52,6 +53,8 @@ export const authRoutes = new Hono<AppEnv>()
       throw new HTTPException(401, { message: "Wrong email or password" });
     }
     return withTenant(sql, u.business_id, async (tx) => {
+      const [biz] = await tx`SELECT status FROM businesses WHERE id = ${u.business_id}`;
+      if (biz?.status === "SUSPENDED") throw new HTTPException(403, { message: SUSPENDED });
       await tx`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ${u.id}`;
       await audit(tx, { businessId: u.business_id, userId: u.id, action: "auth.login", entity: "user", entityId: u.id, ip: c.req.header("cf-connecting-ip") });
       return c.json(await issueTokens(tx, c.env.JWT_SECRET, { id: u.id, businessId: u.business_id, role: u.role }));
@@ -69,6 +72,8 @@ export const authRoutes = new Hono<AppEnv>()
       if (!rotated) throw new HTTPException(401, { message: "Session expired" });
       const [u] = await tx`SELECT id, role, is_active FROM users WHERE id = ${t.user_id}`;
       if (!u?.is_active) throw new HTTPException(401, { message: "Session expired" });
+      const [biz] = await tx`SELECT status FROM businesses WHERE id = ${t.business_id}`;
+      if (biz?.status === "SUSPENDED") throw new HTTPException(403, { message: SUSPENDED });
       return c.json(await issueTokens(tx, c.env.JWT_SECRET, { id: u.id, businessId: t.business_id, role: u.role }));
     });
   })

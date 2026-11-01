@@ -20,6 +20,7 @@ import { supplierRoutes } from "./routes/suppliers";
 import { etimsRoutes } from "./routes/etims";
 import { notificationRoutes } from "./routes/notifications";
 import { transferRoutes } from "./routes/transfers";
+import { adminRoutes } from "./routes/admin";
 
 export const app = new Hono<AppEnv>()
   .use(secureHeaders())
@@ -58,7 +59,8 @@ export const app = new Hono<AppEnv>()
   .route("/v1", exportRoutes)
   .route("/v1", etimsRoutes)
   .route("/v1", notificationRoutes)
-  .route("/v1", transferRoutes);
+  .route("/v1", transferRoutes)
+  .route("/v1", adminRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
