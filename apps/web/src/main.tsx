@@ -1,10 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import { session } from "./api";
 import { AppShell } from "./pages/AppShell";
 import { AuthPage } from "./pages/AuthPage";
+import { LandingPage } from "./pages/LandingPage";
 import { CustomersPage } from "./pages/CustomersPage";
 import { ProductsPage } from "./pages/ProductsPage";
 import { Dashboard } from "./pages/Dashboard";
@@ -21,8 +22,12 @@ import { ReturnsPage } from "./pages/ReturnsPage";
 import { EtimsPage } from "./pages/EtimsPage";
 import { ZReportPage } from "./pages/ZReportPage";
 
-const Protected = ({ children }: { children: React.ReactNode }) =>
-  session.get() ? children : <Navigate to="/login" replace />;
+// Signed-out visitors to "/" see the marketing page; other app routes send them to sign in.
+const Protected = ({ children }: { children: React.ReactNode }) => {
+  const { pathname } = useLocation();
+  if (session.get()) return children;
+  return pathname === "/" ? <LandingPage /> : <Navigate to="/login" replace />;
+};
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
