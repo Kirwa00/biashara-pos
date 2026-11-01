@@ -52,6 +52,7 @@ export function ReportsPage() {
       form.reset();
       expenses.reload();
       r.reload();
+      pnl.reload();
     } catch (err) {
       expenses.setMsg((err as Error).message);
     }
