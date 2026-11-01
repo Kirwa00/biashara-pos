@@ -42,7 +42,7 @@ describe("frame follow-ups", () => {
     expect(s.connection.status).toBe("NOT_CONNECTED");
     expect(s.vatSummary).toMatchObject({ totalVatCents: Number(inv.tax_cents), pendingInvoices: 3, submittedInvoices: 0 });
     const docs = await json<{ etimsStatus: string; cuInvoiceNumber: string | null }[]>(call("/v1/etims/invoices", { token: t }));
-    expect(docs.every((d) => d.etimsStatus === "PENDING" && d.cuInvoiceNumber === null)).toBe(true);
+    expect(docs.every((d) => d.etimsStatus === "QUEUED" && d.cuInvoiceNumber === null)).toBe(true);
     expect(await json<unknown[]>(call("/v1/etims/invoices?period=2001-01", { token: t }))).toEqual([]);
   });
 

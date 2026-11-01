@@ -45,7 +45,7 @@ describe("alerts & reminders jobs", () => {
     const toml = readFileSync(join(import.meta.dirname, "..", "wrangler.toml"), "utf8");
     const crons = JSON.parse(/crons\s*=\s*(\[.*\])/.exec(toml)![1]!) as string[];
     expect(crons.sort()).toEqual(Object.keys(CRON_JOBS).sort());
-    expect(new Set(Object.values(CRON_JOBS))).toEqual(new Set(["morning", "evening"]));
+    expect(new Set(Object.values(CRON_JOBS))).toEqual(new Set(["morning", "evening", "etims"]));
   });
 
   it("morning and evening runs raise each alert once, email owners once, and stay tenant-scoped", async () => {

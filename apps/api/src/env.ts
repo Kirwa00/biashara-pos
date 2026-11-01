@@ -10,6 +10,7 @@ export interface Env {
   PAYHERO_BASE_URL?: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
+  ETIMS_BASE_URL?: string;
 }
 
 export interface AuthClaims {

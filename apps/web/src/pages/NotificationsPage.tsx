@@ -10,8 +10,9 @@ const TONE: Record<Notification["kind"], string> = {
   PAYMENT_ISSUES: "bg-red-50 text-critical",
   PO_ACTION: "bg-sky-50 text-sky-700",
   DAILY_SUMMARY: "bg-primary/10 text-primary",
+  ETIMS_ISSUES: "bg-amber-50 text-amber-700",
 };
-const LINK: Partial<Record<Notification["kind"], string>> = { LOW_STOCK: "/inventory", OVERDUE_INVOICES: "/reminders", PAYMENT_ISSUES: "/sales", PO_ACTION: "/purchase-orders", DAILY_SUMMARY: "/reports" };
+const LINK: Partial<Record<Notification["kind"], string>> = { LOW_STOCK: "/inventory", OVERDUE_INVOICES: "/reminders", PAYMENT_ISSUES: "/sales", PO_ACTION: "/purchase-orders", DAILY_SUMMARY: "/reports", ETIMS_ISSUES: "/etims" };
 const EMAIL: Record<Notification["email_status"], string> = { PENDING: "Email queued", SENT: "Emailed to owners", FAILED: "Email failed, will retry", SKIPPED: "In-app only" };
 
 /** Notification centre: alerts from the 08:00 and 20:00 jobs. Read state is shared by everyone in the business. */

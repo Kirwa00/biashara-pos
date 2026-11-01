@@ -96,11 +96,7 @@ export function AppShell() {
 
         {/* Sidebar Footer */}
         <div className="mt-4 border-t border-slate-800 pt-4 px-3 text-xs text-slate-400 space-y-1">
-          <div className="flex items-center gap-1.5 text-emerald-400">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>eTIMS VSCU Connected</span>
-          </div>
-          <p className="text-[11px] text-slate-500">KRA-VSCU-7801-NW</p>
+          <NavLink to="/etims" className="hover:text-white">eTIMS status: Tax Center</NavLink>
         </div>
       </aside>
 

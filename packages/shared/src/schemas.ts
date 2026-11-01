@@ -164,3 +164,23 @@ export const receiveOrderSchema = z.object({
   lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") })).min(1).max(200)
     .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once per receipt"),
 });
+
+/** OSCU device registration from KRA onboarding; the communication key is stored encrypted. */
+export const etimsSettingsSchema = z.object({
+  environment: z.enum(["SANDBOX", "PRODUCTION"]).default("SANDBOX"),
+  tin: kraPin,
+  bhfId: z.string().regex(/^\d{2}$/, "Branch ID is two digits, e.g. 00").default("00"),
+  deviceSerial: z.string().min(3).max(60),
+  cmcKey: z.string().min(8).max(200),
+  enabled: z.boolean().default(false),
+});
+export type EtimsSettingsInput = z.infer<typeof etimsSettingsSchema>;
+
+/** KRA codes for a product: registered item code, item classification, quantity and packaging units. */
+export const kraCodesSchema = z.object({
+  itemCode: z.string().min(1).max(20),
+  itemClassCode: z.string().regex(/^\d{4,10}$/, "Item class codes are digits"),
+  unitCode: z.string().min(1).max(5).default("U"),
+  pkgUnitCode: z.string().min(1).max(5).default("NT"),
+});
+export type KraCodesInput = z.infer<typeof kraCodesSchema>;
