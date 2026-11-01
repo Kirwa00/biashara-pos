@@ -148,3 +148,15 @@ export const expenseSchema = z.object({
   expenseDate: z.string().refine(isIsoDate, "Invalid date").optional(),
   branchId: z.string().uuid().optional(),
 });
+
+export const purchaseOrderSchema = z.object({
+  supplierId: z.string().uuid(),
+  branchId: z.string().uuid().optional(),
+  note: z.string().trim().max(200).optional(),
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive"), unitCostCents: cents })).min(1).max(200)
+    .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once per order"),
+});
+export const receiveOrderSchema = z.object({
+  supplierRef: z.string().trim().max(60).optional(),
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") })).min(1).max(200),
+});

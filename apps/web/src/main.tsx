@@ -14,6 +14,7 @@ import { InventoryPage } from "./pages/InventoryPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
 import { PaymentsSettingsPage } from "./pages/PaymentsSettingsPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { TillPage } from "./pages/TillPage";
 import { ReceiptPage } from "./pages/ReceiptPage";
@@ -65,6 +66,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="returns" element={<ReturnsPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="suppliers" element={<SuppliersPage />} />
+          <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="etims" element={<EtimsPage />} />
           <Route path="products" element={<ProductsPage />} />

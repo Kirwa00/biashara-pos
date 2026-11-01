@@ -6,7 +6,7 @@ import type { AppEnv } from "../env";
 
 // Users and payment settings are deliberately excluded: they hold password hashes and PayHero credentials.
 const MAX_ROWS = 100_000;
-const ENTITIES = ["products", "categories", "customers", "suppliers", "documents", "document_lines", "payments", "purchases", "purchase_lines", "stock_movements", "stock_balances", "shifts", "supplier_payments", "expenses"];
+const ENTITIES = ["products", "categories", "customers", "suppliers", "documents", "document_lines", "payments", "purchases", "purchase_lines", "stock_movements", "stock_balances", "shifts", "supplier_payments", "expenses", "purchase_orders", "purchase_order_lines"];
 
 const cell = (v: unknown): string => {
   if (v == null) return "";
