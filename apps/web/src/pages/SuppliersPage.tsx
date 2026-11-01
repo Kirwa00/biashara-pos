@@ -72,6 +72,7 @@ export function SuppliersPage() {
       setUnitCost("");
       setSupplierRef("");
       purchases.reload();
+      suppliers.reload();
     } catch (err) {
       setMsg((err as Error).message);
     } finally {

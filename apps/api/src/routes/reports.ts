@@ -1,4 +1,4 @@
-import { expenseSchema } from "@kpos/shared";
+import { expenseSchema, isIsoDate } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { requireAuth, requirePermission } from "../auth";
@@ -7,11 +7,10 @@ import { resolveBranch } from "./stock";
 import type { AppEnv } from "../env";
 import type postgres from "postgres";
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const nairobiToday = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
 const range = (q: (k: string) => string | undefined) => {
   const today = nairobiToday();
-  return { from: DATE.test(q("from") ?? "") ? q("from")! : today, to: DATE.test(q("to") ?? "") ? q("to")! : today };
+  return { from: isIsoDate(q("from") ?? "") ? q("from")! : today, to: isIsoDate(q("to") ?? "") ? q("to")! : today };
 };
 
 /** One row per tracked product at or below its reorder level, stock summed across branches (no balance row = 0). */

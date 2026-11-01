@@ -131,6 +131,8 @@ export const returnSchema = z.object({
   reason: z.string().trim().min(3).max(200),
 });
 
+/** A real calendar date in YYYY-MM-DD (rejects e.g. 2026-02-30). */
+export const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().slice(0, 10) === s;
 export const supplierPaymentSchema = z.object({
   amountCents: z.number().int().positive(),
   method: z.enum(PAYMENT_METHODS).default("BANK"),
@@ -143,6 +145,6 @@ export const expenseSchema = z.object({
   description: z.string().trim().max(200).optional(),
   amountCents: z.number().int().positive(),
   method: z.enum(PAYMENT_METHODS).default("CASH"),
-  expenseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  expenseDate: z.string().refine(isIsoDate, "Invalid date").optional(),
   branchId: z.string().uuid().optional(),
 });

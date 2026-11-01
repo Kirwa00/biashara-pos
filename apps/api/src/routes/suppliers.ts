@@ -1,4 +1,4 @@
-import { purchaseSchema, supplierPaymentSchema, supplierSchema } from "@kpos/shared";
+import { can, purchaseSchema, supplierPaymentSchema, supplierSchema } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -12,8 +12,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const supplierRoutes = new Hono<AppEnv>()
   .use(requireAuth)
+  // Balances are finance data: only roles with reports.view see them; cashiers just get the supplier list.
   .get("/suppliers", requirePermission("stock.view"), async (c) =>
-    c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`
+    c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => !can(c.get("auth").role, "reports.view")
+      ? tx`SELECT * FROM suppliers ORDER BY lower(name) LIMIT 500`
+      : tx`
       SELECT s.*, coalesce(pu.t, 0) - coalesce(pay.t, 0) AS balance_cents FROM suppliers s
       LEFT JOIN (SELECT supplier_id, sum(total_cents) AS t FROM purchases GROUP BY 1) pu ON pu.supplier_id = s.id
       LEFT JOIN (SELECT supplier_id, sum(amount_cents) AS t FROM supplier_payments GROUP BY 1) pay ON pay.supplier_id = s.id
@@ -27,7 +30,7 @@ export const supplierRoutes = new Hono<AppEnv>()
       return s;
     }), 201);
   })
-  .get("/supplier-payments", requirePermission("stock.view"), async (c) =>
+  .get("/supplier-payments", requirePermission("reports.view"), async (c) =>
     c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`
       SELECT sp.*, s.name AS supplier_name FROM supplier_payments sp JOIN suppliers s ON s.id = sp.supplier_id ORDER BY sp.created_at DESC LIMIT 100`)))
   .post("/suppliers/:id/payments", requirePermission("invoices.manage"), zValidator("json", supplierPaymentSchema), async (c) => {

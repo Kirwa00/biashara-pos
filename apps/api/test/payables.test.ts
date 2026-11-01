@@ -30,6 +30,7 @@ describe("payables and expenses", () => {
 
     expect((await post("/v1/expenses", { category: "RENT", amountCents: 10000 }, t)).status).toBe(201);
     expect((await post("/v1/expenses", { category: "BRIBES", amountCents: 1 }, t)).status).toBe(400);
+    expect((await post("/v1/expenses", { category: "RENT", amountCents: 1, expenseDate: "2026-02-30" }, t)).status).toBe(400);
     const sum = (await (await call("/v1/reports/summary", { token: t })).json()) as Record<string, string>;
     expect(sum).toMatchObject({ expenses_cents: "10000", net_profit_cents: "-10000", payable_cents: "30000" });
 
