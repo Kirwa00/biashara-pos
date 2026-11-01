@@ -149,6 +149,9 @@ export const expenseSchema = z.object({
   branchId: z.string().uuid().optional(),
 });
 
+export const REMINDER_CHANNELS = ["WHATSAPP", "SMS", "CALL"] as const;
+export const reminderSchema = z.object({ channel: z.enum(REMINDER_CHANNELS) });
+
 export const purchaseOrderSchema = z.object({
   supplierId: z.string().uuid(),
   branchId: z.string().uuid().optional(),

@@ -1,4 +1,4 @@
-import { can, customerSchema, type CustomerInput } from "@kpos/shared";
+import { can, customerSchema, reminderSchema, type CustomerInput } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -35,6 +35,30 @@ export const customerRoutes = new Hono<AppEnv>()
     const [cust] = await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`SELECT * FROM customers WHERE id = ${c.req.param("id")}`);
     if (!cust) throw new HTTPException(404, { message: "Customer not found" });
     return c.json(cust);
+  })
+  .get("/reminders/overdue", requirePermission("invoices.manage"), async (c) =>
+    c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`
+      SELECT cu.id, cu.name, cu.phone, count(d.id)::int AS invoices, sum(d.total_cents - d.paid_cents) AS overdue_cents, min(d.due_date) AS oldest_due,
+        (now() AT TIME ZONE 'Africa/Nairobi')::date - min(d.due_date) AS days_overdue,
+        (SELECT max(r.created_at) FROM payment_reminders r WHERE r.customer_id = cu.id) AS last_reminded_at,
+        (SELECT count(*)::int FROM payment_reminders r WHERE r.customer_id = cu.id) AS reminders
+      FROM documents d JOIN customers cu ON cu.id = d.customer_id
+      WHERE d.type IN ('INVOICE','SALE') AND d.status IN ('UNPAID','PARTIAL') AND d.due_date < (now() AT TIME ZONE 'Africa/Nairobi')::date
+      GROUP BY cu.id ORDER BY overdue_cents DESC`)))
+  .post("/customers/:id/reminders", requirePermission("invoices.manage"), zValidator("json", reminderSchema), async (c) => {
+    const { sub, bid } = c.get("auth");
+    const id = c.req.param("id");
+    return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
+      const [cust] = await tx`SELECT id FROM customers WHERE id = ${id}`;
+      if (!cust) throw new HTTPException(404, { message: "Customer not found" });
+      const [o] = await tx`SELECT coalesce(sum(total_cents - paid_cents), 0) AS cents FROM documents
+        WHERE customer_id = ${id} AND type IN ('INVOICE','SALE') AND status IN ('UNPAID','PARTIAL') AND due_date < (now() AT TIME ZONE 'Africa/Nairobi')::date`;
+      if (Number(o!.cents) <= 0) throw new HTTPException(409, { message: "Nothing overdue for this customer" });
+      const [r] = await tx`INSERT INTO payment_reminders (business_id, customer_id, channel, overdue_cents, created_by)
+        VALUES (${bid}, ${id}, ${c.req.valid("json").channel}, ${o!.cents}, ${sub}) RETURNING *`;
+      await audit(tx, { businessId: bid, userId: sub, action: "reminder.log", entity: "customer", entityId: id, after: r });
+      return r;
+    }), 201);
   })
   .get("/customers/:id/statement", requirePermission("customers.manage"), async (c) => {
     const id = c.req.param("id");

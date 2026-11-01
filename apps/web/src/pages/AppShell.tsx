@@ -27,6 +27,7 @@ const NAV = [
   { to: "/etims", label: "eTIMS Tax Center" },
   { to: "/products", label: "Products & Catalog" },
   { to: "/customers", label: "Customers & Debtors" },
+  { to: "/reminders", label: "Payment Reminders" },
   { to: "/team", label: "Team & Branches" },
   { to: "/settings/payments", label: "PayHero Settings" },
 ];
