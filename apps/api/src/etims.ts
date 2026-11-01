@@ -136,7 +136,7 @@ export async function reconcile(tx: Tx, period: string) {
       (SELECT coalesce(sum(t.tax_cents), 0) FROM tax_records t WHERE t.document_id = d.id) AS ledger_tax,
       (SELECT count(*)::int FROM tax_records t WHERE t.document_id = d.id) AS ledger_rows
     FROM documents d WHERE d.type IN ('INVOICE','SALE','CREDIT_NOTE') AND to_char(d.issue_date, 'YYYY-MM') = ${period} ORDER BY d.issue_date, d.created_at`;
-  const shared = await tx`SELECT rcpt_no, array_agg(DISTINCT document_id) AS docs FROM etims_submissions WHERE status = 'SUBMITTED' AND rcpt_no IS NOT NULL
+  const shared = await tx`SELECT rcpt_no, json_agg(DISTINCT document_id) AS docs FROM etims_submissions WHERE status = 'SUBMITTED' AND rcpt_no IS NOT NULL
     AND document_id IN (SELECT id FROM documents WHERE to_char(issue_date, 'YYYY-MM') = ${period}) GROUP BY rcpt_no HAVING count(DISTINCT document_id) > 1`;
   const sharedBy = new Map<string, string>();
   for (const r of shared) for (const id of r.docs as string[]) sharedBy.set(id, r.rcpt_no);
