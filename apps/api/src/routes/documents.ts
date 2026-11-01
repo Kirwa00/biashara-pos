@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { requireAuth, requirePermission } from "../auth";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
+import { recordFiscal } from "../etims";
 import { verifyMpesaCodes } from "../payhero";
 import { currentShiftId, requireOpenShift } from "./shifts";
 import { postMovement, resolveBranch } from "./stock";
@@ -95,6 +96,7 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
       VALUES (${ctx.bid}, ${doc!.id}, ${l.productId}, ${l.p.name}, ${l.quantity}, ${l.price}, ${l.p.tax_code}, ${l.t.netCents}, ${l.t.taxCents}, ${l.t.totalCents}, ${cost},
         (SELECT category_id FROM products WHERE id = ${l.productId}))`;
   }
+  if (body.type !== "QUOTE") await recordFiscal(tx, ctx.bid, doc!.id);
   await assertCodesUnused(tx, body.payments);
   for (const p of body.payments)
     await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id) VALUES (${ctx.bid}, ${doc!.id}, ${p.method}, ${p.amountCents}, ${p.reference ?? null}, ${ctx.sub}, ${currentShiftId(tx, ctx.sub)})`;
@@ -184,6 +186,7 @@ export const documentRoutes = new Hono<AppEnv>()
           VALUES (${bid}, ${cn!.id}, ${p.l.product_id}, ${p.l.description}, ${p.quantity}, ${p.l.unit_price_cents}, ${p.l.tax_code}, ${p.net}, ${p.tax}, ${p.total}, ${p.l.unit_cost_cents}, ${p.l.id},
             (SELECT category_id FROM document_lines WHERE id = ${p.l.id}))`;
       }
+      await recordFiscal(tx, bid, cn!.id);
       await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id, direction)
         VALUES (${bid}, ${cn!.id}, ${b.method}, ${total}, ${b.reference ?? null}, ${sub}, ${currentShiftId(tx, sub)}, -1)`;
       await audit(tx, { businessId: bid, userId: sub, action: "document.return", entity: "credit_note", entityId: cn!.id, after: { source: src.id, total, reason: b.reason } });

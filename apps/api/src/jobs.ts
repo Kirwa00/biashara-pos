@@ -4,9 +4,9 @@ import { audit, withTenant } from "./db";
 import type { Env } from "./env";
 import { lowStock } from "./routes/reports";
 
-export type Job = "morning" | "evening";
-/** Cron expressions in wrangler.toml (UTC) → job. 05:00 UTC = 08:00 EAT, 17:00 UTC = 20:00 EAT. */
-export const CRON_JOBS: Record<string, Job> = { "0 5 * * *": "morning", "0 17 * * *": "evening" };
+export type Job = "morning" | "evening" | "etims";
+/** Cron expressions in wrangler.toml (UTC) → job. 05:00 UTC = 08:00 EAT, 17:00 UTC = 20:00 EAT; eTIMS queue every 15 minutes. */
+export const CRON_JOBS: Record<string, Job> = { "0 5 * * *": "morning", "0 17 * * *": "evening", "*/15 * * * *": "etims" };
 
 type Draft = { kind: NotificationKind; title: string; body: string; data: Record<string, unknown> };
 const kes = (c: unknown) => formatKes(Number(c));
@@ -42,6 +42,14 @@ async function morning(tx: postgres.TransactionSql, day: string, now: string): P
   if (po!.approval || po!.delivery) out.push({ kind: "PO_ACTION", title: "Purchase orders awaiting action",
     body: [po!.approval && `${plural(po!.approval, "order")} awaiting approval (${kes(po!.approval_cents)})`, po!.delivery && `${plural(po!.delivery, "order")} awaiting delivery`].filter(Boolean).join("; ") + ".",
     data: { awaiting_approval: po!.approval, approval_cents: String(po!.approval_cents), awaiting_delivery: po!.delivery } });
+  if ((await tx`SELECT 1 FROM etims_settings WHERE enabled`).length) {
+    const [et] = await tx`SELECT count(*) FILTER (WHERE status = 'DEAD')::int AS dead, count(*) FILTER (WHERE status = 'FAILED')::int AS failed,
+      count(*) FILTER (WHERE status = 'QUEUED' AND created_at < ${now}::timestamptz - interval '1 day')::int AS stale FROM etims_submissions`;
+    if (et!.dead || et!.failed || et!.stale) out.push({ kind: "ETIMS_ISSUES", title: "eTIMS submissions need attention",
+      body: [et!.dead && `${plural(et!.dead, "document")} gave up after repeated failures`, et!.failed && `${plural(et!.failed, "document")} failed and will retry`,
+        et!.stale && `${plural(et!.stale, "document")} queued for over a day`].filter(Boolean).join("; ") + ". Open the eTIMS Tax Center to fix and retry.",
+      data: { dead: et!.dead, failed: et!.failed, stale: et!.stale } });
+  }
   return out;
 }
 
@@ -103,7 +111,7 @@ export async function emailPending(env: Env, sql: postgres.Sql, bid: string) {
 }
 
 /** Runs one scheduled job for every active business (or just `businessIds`). Re-running for the same Nairobi day creates and sends nothing new. */
-export async function runJob(env: Env, sql: postgres.Sql, job: Job, opts: { now?: Date; businessIds?: string[] } = {}) {
+export async function runJob(env: Env, sql: postgres.Sql, job: Exclude<Job, "etims">, opts: { now?: Date; businessIds?: string[] } = {}) {
   const now = opts.now ?? new Date();
   const day = nairobiDate(now);
   const ids = opts.businessIds ?? (await sql`SELECT id FROM job_business_ids()`).map((r) => r.id as string);

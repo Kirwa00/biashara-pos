@@ -1,4 +1,4 @@
-export const NOTIFICATION_KINDS = ["LOW_STOCK", "OVERDUE_INVOICES", "PAYMENT_ISSUES", "PO_ACTION", "DAILY_SUMMARY"] as const;
+export const NOTIFICATION_KINDS = ["LOW_STOCK", "OVERDUE_INVOICES", "PAYMENT_ISSUES", "PO_ACTION", "DAILY_SUMMARY", "ETIMS_ISSUES"] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 export const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
@@ -7,6 +7,7 @@ export const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
   PAYMENT_ISSUES: "M-Pesa payments",
   PO_ACTION: "Purchase orders",
   DAILY_SUMMARY: "Daily summary",
+  ETIMS_ISSUES: "eTIMS",
 };
 
 export type Notification = {

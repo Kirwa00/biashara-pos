@@ -1,6 +1,7 @@
 import { app } from "./app";
 import { createSql } from "./db";
 import type { Env } from "./env";
+import { processEtimsQueue } from "./etims";
 import { CRON_JOBS, runJob } from "./jobs";
 
 export default {
@@ -9,6 +10,6 @@ export default {
     const job = CRON_JOBS[event.cron];
     if (!job) return;
     const sql = createSql(env);
-    ctx.waitUntil(runJob(env, sql, job, { now: new Date(event.scheduledTime) }).then((r) => console.log(`job ${job}`, r)).finally(() => sql.end({ timeout: 5 })));
+    ctx.waitUntil((job === "etims" ? processEtimsQueue(env, sql) : runJob(env, sql, job, { now: new Date(event.scheduledTime) })).then((r) => console.log(`job ${job}`, r)).finally(() => sql.end({ timeout: 5 })));
   },
 } satisfies ExportedHandler<Env>;
