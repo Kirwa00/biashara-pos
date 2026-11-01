@@ -51,7 +51,7 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
   }
   if (body.type === "QUOTE" && body.payments.length) throw new HTTPException(422, { message: "Quotations cannot take payments" });
   if (body.type === "INVOICE" && !body.customerId) throw new HTTPException(422, { message: "Invoices need a customer" });
-  if (body.type === "SALE" && body.payments.length) await requireOpenShift(tx, ctx.sub);
+  if (body.type === "SALE") await requireOpenShift(tx, ctx.sub);
   const branchId = await resolveBranch(tx, ctx.sub, body.branchId);
   const [cust] = body.customerId ? await tx`SELECT * FROM customers WHERE id = ${body.customerId} AND is_active FOR UPDATE` : [];
   if (body.customerId && !cust) throw new HTTPException(400, { message: "Unknown customer" });
@@ -193,6 +193,7 @@ export const documentRoutes = new Hono<AppEnv>()
     return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${c.req.param("id")} AND type <> 'QUOTE' FOR UPDATE`;
       if (!doc) throw new HTTPException(404, { message: "Invoice not found" });
+      if (doc.type === "SALE") await requireOpenShift(tx, sub);
       await applyPayment(tx, doc, p!.amountCents);
       await assertCodesUnused(tx, [p!]);
       const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id) VALUES (${bid}, ${doc.id}, ${p!.method}, ${p!.amountCents}, ${p!.reference ?? null}, ${sub}, ${currentShiftId(tx, sub)}) RETURNING *`;

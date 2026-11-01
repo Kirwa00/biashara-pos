@@ -5,15 +5,30 @@ import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
 import { decryptSecret, encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
-import type { AppEnv } from "../env";
+import type { AppEnv, Env } from "../env";
+import type postgres from "postgres";
 import { amountShillings, sameChannel, base, key, payheroGet, type TxStatus } from "../payhero";
 import { applyPayment } from "./documents";
 import { currentShiftId } from "./shifts";
 
 const basic = (u: string, p: string) => `Basic ${btoa(`${u}:${p}`)}`;
 const toPhone254 = (p: string) => p.replace(/^\+/, "").replace(/^0/, "254");
-/** M-Pesa prompts expire on the phone well within this, so older pending prompts stop reserving the balance. */
+/** A prompt waiting longer than this is re-checked with PayHero before a new prompt may claim its amount. */
 const STK_WAIT = "3 minutes";
+
+/** Pending prompts keep their amount reserved until PayHero reports them FAILED; an unreachable PayHero keeps the reservation. */
+async function releaseFailedPrompts(env: Env, sql: postgres.Sql, bid: string, documentId: string) {
+  const { stale, s } = await withTenant(sql, bid, async (tx) => ({
+    stale: await tx`SELECT id, provider_ref FROM payments WHERE document_id = ${documentId} AND status = 'PENDING'
+      AND provider_ref IS NOT NULL AND created_at <= now() - ${STK_WAIT}::interval`,
+    s: (await tx`SELECT * FROM payment_settings`)[0],
+  }));
+  if (!s) return;
+  for (const p of stale) {
+    const st = await payheroGet<TxStatus>(env, s, `/api/v2/transaction-status?reference=${encodeURIComponent(p.provider_ref)}`);
+    if (st?.status === "FAILED") await withTenant(sql, bid, (tx) => tx`UPDATE payments SET status = 'FAILED' WHERE id = ${p.id} AND status = 'PENDING'`);
+  }
+}
 
 /** Business-scoped PayHero settings and STK push. */
 export const paymentRoutes = new Hono<AppEnv>()
@@ -40,6 +55,7 @@ export const paymentRoutes = new Hono<AppEnv>()
     const { sub, bid } = c.get("auth");
     const b = c.req.valid("json");
     const sql = c.get("sql");
+    await releaseFailedPrompts(c.env, sql, bid, b.documentId);
     const { pay, s } = await withTenant(sql, bid, async (tx) => {
       const [s] = await tx`SELECT * FROM payment_settings`;
       if (!s) throw new HTTPException(409, { message: "PayHero is not set up for this business" });
@@ -47,7 +63,7 @@ export const paymentRoutes = new Hono<AppEnv>()
       const [doc] = await tx`SELECT * FROM documents WHERE id = ${b.documentId} AND type <> 'QUOTE' FOR UPDATE`;
       if (!doc) throw new HTTPException(404, { message: "Invoice not found" });
       const [w] = await tx`SELECT coalesce(sum(amount_cents), 0) AS cents FROM payments
-        WHERE document_id = ${doc.id} AND status = 'PENDING' AND created_at > now() - ${STK_WAIT}::interval`;
+        WHERE document_id = ${doc.id} AND status = 'PENDING' AND (provider_ref IS NOT NULL OR created_at > now() - ${STK_WAIT}::interval)`;
       if (b.amountCents > Number(doc.total_cents) - Number(doc.paid_cents) - Number(w!.cents))
         throw new HTTPException(422, { message: Number(w!.cents) ? "Amount exceeds balance: an M-Pesa prompt for this invoice is still waiting" : "Amount exceeds balance" });
       const [pay] = await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, status, phone, created_by)
