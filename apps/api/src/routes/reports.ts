@@ -1,6 +1,7 @@
 import { expenseSchema, isIsoDate } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
 import { audit, withTenant } from "../db";
 import { resolveBranch } from "./stock";
@@ -42,6 +43,25 @@ export const reportRoutes = new Hono<AppEnv>()
       const [pay] = await tx`SELECT (SELECT coalesce(sum(total_cents), 0) FROM purchases) - (SELECT coalesce(sum(amount_cents), 0) FROM supplier_payments) AS payable_cents`;
       const net_profit_cents = String(Number(profit!.gross_profit_cents) - Number(exp!.expenses_cents));
       return { from, to, sales, returns, ...profit, ...exp, net_profit_cents, received, ...owed, ...pay, ...stock, ...low };
+    }));
+  })
+  // Sales net of returns, grouped by product, category or cashier.
+  .get("/reports/breakdown", requirePermission("reports.view"), async (c) => {
+    const by = c.req.query("by") ?? "product";
+    if (!["product", "category", "cashier"].includes(by)) throw new HTTPException(400, { message: "by must be product, category or cashier" });
+    const { from, to } = range((k) => c.req.query(k));
+    return c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => {
+      const [key, label] = by === "product" ? [tx`l.product_id::text`, tx`p.name`]
+        : by === "category" ? [tx`coalesce(cat.id::text, 'none')`, tx`coalesce(cat.name, 'Uncategorised')`]
+        : [tx`u.id::text`, tx`u.name`];
+      return tx`
+        SELECT ${key} AS key, ${label} AS label, sum(l.quantity * sg.s) AS quantity, sum(l.total_cents * sg.s) AS total_cents,
+          sum((l.net_cents - round(l.unit_cost_cents * l.quantity)) * sg.s) AS gross_profit_cents
+        FROM document_lines l JOIN documents d ON d.id = l.document_id
+        JOIN products p ON p.id = l.product_id LEFT JOIN categories cat ON cat.id = p.category_id JOIN users u ON u.id = d.created_by
+        CROSS JOIN LATERAL (SELECT CASE WHEN d.type = 'CREDIT_NOTE' THEN -1 ELSE 1 END AS s) sg
+        WHERE d.type IN ('INVOICE','SALE','CREDIT_NOTE') AND d.issue_date BETWEEN ${from} AND ${to}
+        GROUP BY 1, 2 ORDER BY 4 DESC LIMIT 50`;
     }));
   })
   .get("/expenses", requirePermission("reports.view"), async (c) => {
