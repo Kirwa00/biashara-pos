@@ -13,7 +13,7 @@ export const businessRoutes = new Hono<AppEnv>()
     const { sub, bid } = c.get("auth");
     return withTenant(c.get("sql"), bid, async (tx) => {
       const [user] = await tx`SELECT id, name, email, role, branch_id FROM users WHERE id = ${sub}`;
-      const [business] = await tx`SELECT id, name, kra_pin, currency, timezone, status FROM businesses WHERE id = ${bid}`;
+      const [business] = await tx`SELECT id, name, kra_pin, phone, currency, timezone, status FROM businesses WHERE id = ${bid}`;
       return c.json({ user, business });
     });
   })

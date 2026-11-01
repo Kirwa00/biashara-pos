@@ -216,6 +216,11 @@ export function InvoicesPage() {
                       >
                         Print
                       </a>
+                      {d.type !== "SALE" && (
+                        <a className="text-primary hover:underline font-medium text-xs" href={`/print/${d.id}`} target="_blank" rel="noreferrer">
+                          A4 / PDF
+                        </a>
+                      )}
                       {d.type === "QUOTE" && d.status === "OPEN" && (
                         <button
                           className="rounded bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary hover:bg-primary/20"
