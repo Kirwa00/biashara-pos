@@ -15,7 +15,7 @@ const range = (q: (k: string) => string | undefined) => {
 };
 
 /** One row per tracked product at or below its reorder level, stock summed across branches (no balance row = 0). */
-const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
+export const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
   FROM products p LEFT JOIN stock_balances b ON b.product_id = p.id
   WHERE p.is_active AND p.track_stock AND p.reorder_level > 0
   GROUP BY p.id HAVING coalesce(sum(b.on_hand), 0) <= p.reorder_level`;

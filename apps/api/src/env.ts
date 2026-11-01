@@ -8,6 +8,8 @@ export interface Env {
   APP_ORIGIN: string;
   ENCRYPTION_KEY?: string;
   PAYHERO_BASE_URL?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
 }
 
 export interface AuthClaims {
