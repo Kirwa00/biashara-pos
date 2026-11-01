@@ -1,12 +1,14 @@
 import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { formatKes } from "@kpos/shared";
-import { api, session } from "../api";
+import { api, session, support } from "../api";
 import { Loading } from "./ui";
 
 type Me = {
   user: { name: string; role: string };
   business: { name: string; kra_pin?: string | null };
+  isSuperAdmin?: boolean;
+  supportSession?: boolean;
 };
 
 type ShiftSummary = {
@@ -71,6 +73,7 @@ export function AppShell() {
   }, [nav]);
 
   async function logout() {
+    if (support.active()) { support.exit(); window.location.href = "/admin"; return; }
     await api("/auth/logout", { method: "POST" }).catch(() => {});
     session.clear();
     nav("/login");
@@ -90,7 +93,7 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto">
-          {NAV.map((n) => (
+          {(me?.isSuperAdmin ? [...NAV, { to: "/admin", label: "Platform Admin" }] : NAV).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -162,6 +165,12 @@ export function AppShell() {
           </div>
         </header>
 
+        {me?.supportSession && (
+          <div className="flex items-center justify-between gap-3 bg-amber-100 px-6 py-2 text-sm text-amber-900">
+            <span><strong>Support view</strong> of {me.business.name}: read-only, ends after 15 minutes.</span>
+            <button onClick={() => { support.exit(); window.location.href = "/admin"; }} className="rounded-lg bg-amber-900 px-3 py-1 text-xs font-semibold text-white">Exit support view</button>
+          </div>
+        )}
         <main className="flex-1 p-6 overflow-y-auto">
           <Suspense fallback={<Loading />}>
             <Outlet />

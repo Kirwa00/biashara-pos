@@ -7,8 +7,8 @@ import type { AppEnv, AuthClaims } from "./env";
 export const ACCESS_TTL_S = 15 * 60;
 export const REFRESH_TTL_S = 30 * 24 * 3600;
 
-export function signAccess(secret: string, user: { id: string; businessId: string; role: Role }) {
-  const claims: AuthClaims = { sub: user.id, bid: user.businessId, role: user.role, exp: Math.floor(Date.now() / 1000) + ACCESS_TTL_S };
+export function signAccess(secret: string, user: { id: string; businessId: string; role: Role }, imp?: string) {
+  const claims: AuthClaims = { sub: user.id, bid: user.businessId, role: user.role, exp: Math.floor(Date.now() / 1000) + ACCESS_TTL_S, ...(imp ? { imp } : {}) };
   return sign({ ...claims }, secret, "HS256");
 }
 
@@ -20,6 +20,8 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   } catch {
     throw new HTTPException(401, { message: "Session expired" });
   }
+  // Support sessions can look but never change anything.
+  if (c.get("auth").imp && (c.req.method !== "GET" || c.req.path.startsWith("/v1/export"))) throw new HTTPException(403, { message: "Read-only support session" });
   await next();
 });
 

@@ -26,6 +26,7 @@ const DocumentPrintPage = page(() => import("./pages/DocumentPrintPage"), "Docum
 const RemindersPage = page(() => import("./pages/RemindersPage"), "RemindersPage");
 const NotificationsPage = page(() => import("./pages/NotificationsPage"), "NotificationsPage");
 const TransfersPage = page(() => import("./pages/TransfersPage"), "TransfersPage");
+const AdminPage = page(() => import("./pages/AdminPage"), "AdminPage");
 const ShiftsPage = page(() => import("./pages/ShiftsPage"), "ShiftsPage");
 const ReturnsPage = page(() => import("./pages/ReturnsPage"), "ReturnsPage");
 const EtimsPage = page(() => import("./pages/EtimsPage"), "EtimsPage");
@@ -93,6 +94,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="team" element={<TeamPage />} />
           <Route path="settings/payments" element={<PaymentsSettingsPage />} />
+          <Route path="admin" element={<AdminPage />} />
         </Route>
       </Routes>
       </Suspense>

@@ -25,6 +25,10 @@ This review was done against `docs/kenya_pos_sdlc.md` §9–10 at the end of S10
 - **Audit:** price-affecting and financial writes call `audit()`. `audit_logs` is append-only for the app role, and posted documents are never deleted.
 - **Secrets:** PayHero passwords and eTIMS cmcKeys are AES-256-GCM encrypted and never returned by the API.
 
+## Gate 4 additions
+
+- **Platform admin (S12):** admins are matched by verified sign-in plus `SUPER_ADMIN_EMAILS`. The cross-tenant list goes through one `SECURITY DEFINER` function (`admin_businesses()`). Suspension is enforced at sign-in and refresh, and existing refresh tokens are revoked. Support views are 15-minute access tokens carrying an `imp` claim, with no refresh token. `requireAuth` rejects every non-GET request and `/v1/export` for them. Every admin action is written to `admin_actions` and to the business's own `audit_logs`.
+
 ## Accepted risks (documented for release)
 
 | Risk | Why accepted | Mitigation |
