@@ -64,6 +64,11 @@ describe("prototype flows", () => {
     expect(rep.receivable_cents).toBe("0");
     expect(rep.stock_value_cents).toBe("120000");
     expect(rep.received.map((r) => r.method)).toEqual(["BANK", "CASH", "MPESA"]);
+    const byProduct = await json<{ label: string; quantity: string; total_cents: string }[]>(call("/v1/reports/breakdown?by=product", { token: t }));
+    expect(byProduct).toEqual([expect.objectContaining({ quantity: "12.000", total_cents: "220000" })]);
+    const byCashier = await json<{ total_cents: string }[]>(call("/v1/reports/breakdown?by=cashier", { token: t }));
+    expect(byCashier.map((r) => r.total_cents)).toEqual(["220000"]);
+    expect((await call("/v1/reports/breakdown?by=planet", { token: t })).status).toBe(400);
   });
 
   it("auto-confirms hand-entered M-Pesa codes only when PayHero reports that code for the exact amount", async () => {

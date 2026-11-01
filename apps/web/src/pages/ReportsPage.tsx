@@ -7,6 +7,7 @@ type Summary = { from: string; to: string; sales: { count: number; total_cents: 
   received: { method: string; amount_cents: string }[]; receivable_cents: string; overdue_cents: string; stock_value_cents: string; low_stock: number };
 
 const EXPORTS = ["products", "customers", "suppliers", "documents", "document_lines", "payments", "purchases", "supplier_payments", "expenses", "stock_movements", "shifts"];
+type Breakdown = { key: string; label: string; quantity: string; total_cents: string; gross_profit_cents: string };
 type Expense = { id: string; category: string; description: string | null; amount_cents: string; method: string; expense_date: string };
 
 export function ReportsPage() {
@@ -15,6 +16,8 @@ export function ReportsPage() {
   const [range, setRange] = useState({ from: today, to: today });
   const r = useLoad<Summary | null>(`/reports/summary?from=${range.from}&to=${range.to}`, null);
   const s = r.data;
+  const [by, setBy] = useState<"product" | "category" | "cashier">("product");
+  const breakdown = useLoad<Breakdown[]>(`/reports/breakdown?by=${by}&from=${range.from}&to=${range.to}`, []);
   const expenses = useLoad<Expense[]>(`/expenses?from=${range.from}&to=${range.to}`, []);
   async function addExpense(e: React.FormEvent<HTMLFormElement>) {
     const form = e.currentTarget;
@@ -52,6 +55,22 @@ export function ReportsPage() {
         </div>
         <Card title="Cash received">
           {s.received.length ? s.received.map((m) => <div key={m.method} className="flex justify-between border-t border-line py-2"><span>{m.method}</span><span className="num">{formatKes(Number(m.amount_cents))}</span></div>) : <p className="text-muted">No payments in this period.</p>}
+        </Card>
+        <Card title="Sales breakdown (net of returns)">
+          <div className="mb-3 flex gap-2">
+            {(["product", "category", "cashier"] as const).map((b) => (
+              <button key={b} onClick={() => setBy(b)} className={`rounded-lg border border-line px-3 py-1 text-sm capitalize ${by === b ? "bg-surface font-semibold" : ""}`}>{b}</button>
+            ))}
+          </div>
+          <Note msg={breakdown.msg} />
+          {breakdown.data.length ? (
+            <table className="w-full text-left text-sm">
+              <thead className="text-muted"><tr><th className="py-1 capitalize">{by}</th><th className="text-right">{by === "product" ? "Qty" : ""}</th><th className="text-right">Sales</th><th className="text-right">Gross profit</th></tr></thead>
+              <tbody>{breakdown.data.map((row) => (
+                <tr key={row.key} className="border-t border-line"><td className="py-2">{row.label}</td><td className="num text-right">{by === "product" ? Number(row.quantity) : ""}</td><td className="num text-right">{formatKes(Number(row.total_cents))}</td><td className="num text-right">{formatKes(Number(row.gross_profit_cents))}</td></tr>
+              ))}</tbody>
+            </table>
+          ) : <p className="text-sm text-muted">No sales in this period.</p>}
         </Card>
       </>)}
       <Card title="Operating expenses">
