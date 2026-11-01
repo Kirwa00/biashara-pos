@@ -9,7 +9,7 @@ const ids = (await sql<{ id: string }[]>`SELECT id FROM job_business_ids()`).map
 const [counts] = await sql`SELECT (SELECT count(*) FROM documents)::int AS documents, (SELECT count(*) FROM stock_movements)::int AS movements, (SELECT count(*) FROM payments)::int AS payments`;
 let bad = 0;
 for (const bid of ids) {
-  const r = await withTenant(sql, bid, (tx) => integrityReport(tx));
+  const r = await withTenant(sql, bid, (tx) => integrityReport(tx, bid));
   if (r.ok) continue;
   bad++;
   console.error(`business ${bid}: ${r.failed.join(", ")}`, JSON.stringify(Object.fromEntries(r.failed.map((k) => [k, r.checks[k as keyof typeof r.checks].slice(0, 3)]))));
