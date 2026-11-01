@@ -158,5 +158,6 @@ export const purchaseOrderSchema = z.object({
 });
 export const receiveOrderSchema = z.object({
   supplierRef: z.string().trim().max(60).optional(),
-  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") })).min(1).max(200),
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") })).min(1).max(200)
+    .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once per receipt"),
 });

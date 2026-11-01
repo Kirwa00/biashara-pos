@@ -31,6 +31,7 @@ describe("purchase orders", () => {
     const list = await json<{ id: string; outstanding_cents: string }[]>(call("/v1/purchase-orders", { token: t }));
     expect(list.find((x) => x.id === po.id)?.outstanding_cents).toBe("30000");
     expect((await post(`/v1/purchase-orders/${po.id}/receive`, { lines: [{ productId: p.id, quantity: 7 }] }, t)).status).toBe(409);
+    expect((await post(`/v1/purchase-orders/${po.id}/receive`, { lines: [{ productId: p.id, quantity: 4 }, { productId: p.id, quantity: 4 }] }, t)).status).toBe(400);
     expect(await json(post(`/v1/purchase-orders/${po.id}/receive`, { lines: [{ productId: p.id, quantity: 6 }] }, t))).toMatchObject({ status: "RECEIVED" });
     expect((await post(`/v1/purchase-orders/${po.id}/cancel`, {}, t)).status).toBe(409);
 
@@ -43,5 +44,13 @@ describe("purchase orders", () => {
     expect((await post(`/v1/purchase-orders/${po2.id}/cancel`, {}, t)).status).toBe(200);
     expect((await post(`/v1/purchase-orders/${po2.id}/receive`, { lines: [{ productId: p.id, quantity: 1 }] }, t)).status).toBe(409);
     expect((await call("/v1/purchase-orders/not-a-uuid", { token: t })).status).toBe(404);
+
+    // 0.003 @ 500c = 1.5c -> 2c on the order; split receipts must still total 2c.
+    const sup2 = await json<{ id: string }>(post("/v1/suppliers", { name: "Fractions Ltd" }, t));
+    const po3 = await json<{ id: string; total_cents: string }>(post("/v1/purchase-orders", { supplierId: sup2.id, lines: [{ productId: p.id, quantity: 0.003, unitCostCents: 500 }] }, t));
+    await post(`/v1/purchase-orders/${po3.id}/approve`, {}, t);
+    for (let i = 0; i < 3; i++) await post(`/v1/purchase-orders/${po3.id}/receive`, { lines: [{ productId: p.id, quantity: 0.001 }] }, t);
+    const sups2 = await json<{ id: string; balance_cents: string }[]>(call("/v1/suppliers", { token: t }));
+    expect(sups2.find((s) => s.id === sup2.id)?.balance_cents).toBe(po3.total_cents);
   });
 });

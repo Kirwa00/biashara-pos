@@ -11,11 +11,11 @@ import { postMovement, resolveBranch } from "./stock";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Tx = Parameters<typeof postMovement>[0];
-type GoodsLine = { productId: string; quantity: number; unitCostCents: number };
+type GoodsLine = { productId: string; quantity: number; unitCostCents: number; totalCents?: number };
 
 /** Posts a GRN: the purchase, its lines and the stock movements. */
 async function receiveGoods(tx: Tx, a: { bid: string; sub: string; branchId: string; supplierId: string; supplierRef?: string; purchaseOrderId?: string; lines: GoodsLine[] }) {
-  const total = a.lines.reduce((s, l) => s + Math.round(l.quantity * l.unitCostCents), 0);
+  const total = a.lines.reduce((s, l) => s + (l.totalCents ?? Math.round(l.quantity * l.unitCostCents)), 0);
   const [pu] = await tx`INSERT INTO purchases (business_id, branch_id, supplier_id, number, supplier_ref, total_cents, created_by, purchase_order_id)
     VALUES (${a.bid}, ${a.branchId}, ${a.supplierId}, ${await nextNumber(tx, a.bid, "PURCHASE")}, ${a.supplierRef ?? null}, ${total}, ${a.sub}, ${a.purchaseOrderId ?? null}) RETURNING *`;
   for (const l of a.lines) {
@@ -80,13 +80,13 @@ export const supplierRoutes = new Hono<AppEnv>()
       return pu;
     }), 201);
   })
-  .get("/purchase-orders", requirePermission("stock.view"), async (c) =>
+  .get("/purchase-orders", requirePermission("reports.view"), async (c) =>
     c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`
       SELECT po.*, s.name AS supplier_name,
         CASE WHEN po.status IN ('APPROVED', 'PARTIAL') THEN (SELECT coalesce(round(sum((l.quantity_ordered - l.quantity_received) * l.unit_cost_cents)), 0)
           FROM purchase_order_lines l WHERE l.purchase_order_id = po.id) ELSE 0 END AS outstanding_cents
       FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id ORDER BY po.created_at DESC LIMIT 200`)))
-  .get("/purchase-orders/:id", requirePermission("stock.view"), async (c) => {
+  .get("/purchase-orders/:id", requirePermission("reports.view"), async (c) => {
     const id = c.req.param("id");
     if (!UUID.test(id)) throw notFound();
     return c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => {
@@ -143,7 +143,11 @@ export const supplierRoutes = new Hono<AppEnv>()
         if (!l) throw new HTTPException(422, { message: "That product is not on this order" });
         const outstanding = Number(l.quantity_ordered) - Number(l.quantity_received);
         if (r.quantity > outstanding + 1e-9) throw new HTTPException(409, { message: `Only ${outstanding} still to receive for this product` });
-        goods.push({ productId: r.productId, quantity: r.quantity, unitCostCents: Number(l.unit_cost_cents) });
+        // Cost the receipt as the change in the line's rounded received value, so split deliveries sum to the order line total.
+        const cost = Number(l.unit_cost_cents);
+        const before = Number(l.quantity_received);
+        const totalCents = Math.round((before + r.quantity) * cost) - Math.round(before * cost);
+        goods.push({ productId: r.productId, quantity: r.quantity, unitCostCents: cost, totalCents });
         await tx`UPDATE purchase_order_lines SET quantity_received = quantity_received + ${r.quantity} WHERE id = ${l.id}`;
       }
       const purchase = await receiveGoods(tx, { bid, sub, branchId: po.branch_id, supplierId: po.supplier_id, supplierRef: b.supplierRef, purchaseOrderId: id, lines: goods });
