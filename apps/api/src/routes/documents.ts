@@ -91,8 +91,9 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
       const r = await postMovement(tx, { businessId: ctx.bid, branchId, productId: l.productId, type: "SALE", quantity: -l.quantity, refType: "document", refId: doc!.id, userId: ctx.sub });
       cost = r.avgCostCents || cost;
     }
-    await tx`INSERT INTO document_lines (business_id, document_id, product_id, description, quantity, unit_price_cents, tax_code, net_cents, tax_cents, total_cents, unit_cost_cents)
-      VALUES (${ctx.bid}, ${doc!.id}, ${l.productId}, ${l.p.name}, ${l.quantity}, ${l.price}, ${l.p.tax_code}, ${l.t.netCents}, ${l.t.taxCents}, ${l.t.totalCents}, ${cost})`;
+    await tx`INSERT INTO document_lines (business_id, document_id, product_id, description, quantity, unit_price_cents, tax_code, net_cents, tax_cents, total_cents, unit_cost_cents, category_id)
+      VALUES (${ctx.bid}, ${doc!.id}, ${l.productId}, ${l.p.name}, ${l.quantity}, ${l.price}, ${l.p.tax_code}, ${l.t.netCents}, ${l.t.taxCents}, ${l.t.totalCents}, ${cost},
+        (SELECT category_id FROM products WHERE id = ${l.productId}))`;
   }
   await assertCodesUnused(tx, body.payments);
   for (const p of body.payments)
@@ -178,8 +179,9 @@ export const documentRoutes = new Hono<AppEnv>()
       for (const p of picked) {
         if (p.l.track_stock)
           await postMovement(tx, { businessId: bid, branchId: src.branch_id, productId: p.l.product_id, type: "RETURN", quantity: p.quantity, unitCostCents: Number(p.l.unit_cost_cents), reason: b.reason, refType: "document", refId: cn!.id, userId: sub });
-        await tx`INSERT INTO document_lines (business_id, document_id, product_id, description, quantity, unit_price_cents, tax_code, net_cents, tax_cents, total_cents, unit_cost_cents, source_line_id)
-          VALUES (${bid}, ${cn!.id}, ${p.l.product_id}, ${p.l.description}, ${p.quantity}, ${p.l.unit_price_cents}, ${p.l.tax_code}, ${p.net}, ${p.tax}, ${p.total}, ${p.l.unit_cost_cents}, ${p.l.id})`;
+        await tx`INSERT INTO document_lines (business_id, document_id, product_id, description, quantity, unit_price_cents, tax_code, net_cents, tax_cents, total_cents, unit_cost_cents, source_line_id, category_id)
+          VALUES (${bid}, ${cn!.id}, ${p.l.product_id}, ${p.l.description}, ${p.quantity}, ${p.l.unit_price_cents}, ${p.l.tax_code}, ${p.net}, ${p.tax}, ${p.total}, ${p.l.unit_cost_cents}, ${p.l.id},
+            (SELECT category_id FROM document_lines WHERE id = ${p.l.id}))`;
       }
       await tx`INSERT INTO payments (business_id, document_id, method, amount_cents, reference, created_by, shift_id, direction)
         VALUES (${bid}, ${cn!.id}, ${b.method}, ${total}, ${b.reference ?? null}, ${sub}, ${currentShiftId(tx, sub)}, -1)`;

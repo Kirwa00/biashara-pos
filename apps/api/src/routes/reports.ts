@@ -58,7 +58,7 @@ export const reportRoutes = new Hono<AppEnv>()
         SELECT ${key} AS key, ${label} AS label, sum(l.quantity * sg.s) AS quantity, sum(l.total_cents * sg.s) AS total_cents,
           sum((l.net_cents - round(l.unit_cost_cents * l.quantity)) * sg.s) AS gross_profit_cents
         FROM document_lines l JOIN documents d ON d.id = l.document_id
-        JOIN products p ON p.id = l.product_id LEFT JOIN categories cat ON cat.id = p.category_id JOIN users u ON u.id = d.created_by
+        JOIN products p ON p.id = l.product_id LEFT JOIN categories cat ON cat.id = l.category_id JOIN users u ON u.id = d.created_by
         CROSS JOIN LATERAL (SELECT CASE WHEN d.type = 'CREDIT_NOTE' THEN -1 ELSE 1 END AS s) sg
         WHERE d.type IN ('INVOICE','SALE','CREDIT_NOTE') AND d.issue_date BETWEEN ${from} AND ${to}
         GROUP BY 1, 2 ORDER BY 4 DESC LIMIT 50`;
