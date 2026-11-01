@@ -11,3 +11,9 @@ APP_ORIGIN = "http://localhost:5173"
 # binding = "HYPERDRIVE"
 # id = "<hyperdrive-id>"
 # Local dev: put DATABASE_URL and JWT_SECRET in .dev.vars (see .dev.vars.example).
+
+# Sprint 8 alerts (UTC). Jobs are idempotent per Nairobi day, so a retried or overlapping run sends nothing twice.
+# 05:00 = 08:00 EAT low stock, overdue, M-Pesa issues, POs; 17:00 = 20:00 EAT daily owner summary.
+# Owner email needs `wrangler secret put RESEND_API_KEY` and EMAIL_FROM (a Resend-verified sender); without them alerts stay in-app.
+[triggers]
+crons = ["0 5 * * *", "0 17 * * *"]

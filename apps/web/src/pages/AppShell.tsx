@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { formatKes } from "@kpos/shared";
 import { api, session } from "../api";
 
@@ -28,6 +28,7 @@ const NAV = [
   { to: "/products", label: "Products & Catalog" },
   { to: "/customers", label: "Customers & Debtors" },
   { to: "/reminders", label: "Payment Reminders" },
+  { to: "/notifications", label: "Notifications" },
   { to: "/team", label: "Team & Branches" },
   { to: "/settings/payments", label: "PayHero Settings" },
 ];
@@ -35,7 +36,14 @@ const NAV = [
 export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
   const [currentShift, setCurrentShift] = useState<ShiftSummary | null>(null);
+  const [unread, setUnread] = useState(0);
   const nav = useNavigate();
+  const { pathname } = useLocation();
+
+  // Cashiers can't see notifications (403); the bell just stays at zero.
+  useEffect(() => {
+    api<{ unread: number }>("/notifications?unread=1").then((n) => setUnread(n.unread)).catch(() => {});
+  }, [pathname]);
 
   useEffect(() => {
     api<Me>("/me")
@@ -121,6 +129,11 @@ export function AppShell() {
             >
               <span className={`h-2 w-2 rounded-full ${currentShift ? "bg-primary animate-pulse" : "bg-slate-400"}`} />
               {currentShift ? `Till Shift: ${formatKes(currentShift.expected_cash_cents)}` : "No Shift Open"}
+            </NavLink>
+
+            <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-ink transition">
+              Alerts
+              {unread > 0 && <span className="num absolute -right-1.5 -top-1.5 rounded-full bg-critical px-1.5 text-[10px] font-bold text-white">{unread}</span>}
             </NavLink>
 
             {/* Offline / Online indicator */}

@@ -20,6 +20,7 @@ import { TillPage } from "./pages/TillPage";
 import { ReceiptPage } from "./pages/ReceiptPage";
 import { DocumentPrintPage } from "./pages/DocumentPrintPage";
 import { RemindersPage } from "./pages/RemindersPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
 import { ShiftsPage } from "./pages/ShiftsPage";
 import { ReturnsPage } from "./pages/ReturnsPage";
 import { EtimsPage } from "./pages/EtimsPage";
@@ -82,6 +83,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="products" element={<ProductsPage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="reminders" element={<RemindersPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
           <Route path="team" element={<TeamPage />} />
           <Route path="settings/payments" element={<PaymentsSettingsPage />} />
         </Route>
