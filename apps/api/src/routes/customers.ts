@@ -44,7 +44,7 @@ export const customerRoutes = new Hono<AppEnv>()
         (SELECT count(*)::int FROM payment_reminders r WHERE r.customer_id = cu.id) AS reminders
       FROM documents d JOIN customers cu ON cu.id = d.customer_id
       WHERE d.type IN ('INVOICE','SALE') AND d.status IN ('UNPAID','PARTIAL') AND d.due_date < (now() AT TIME ZONE 'Africa/Nairobi')::date
-      GROUP BY cu.id ORDER BY overdue_cents DESC LIMIT 200`)))
+      GROUP BY cu.id ORDER BY overdue_cents DESC`)))
   .post("/customers/:id/reminders", requirePermission("invoices.manage"), zValidator("json", reminderSchema), async (c) => {
     const { sub, bid } = c.get("auth");
     const id = c.req.param("id");
