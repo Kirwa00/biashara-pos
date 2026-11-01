@@ -14,7 +14,7 @@ npm install
 # Postgres 14+: superuser for migrations + non-owner app role (RLS applies to it)
 psql -c "CREATE ROLE kpos_app LOGIN PASSWORD 'app';"
 MIGRATE_DATABASE_URL=postgres://<superuser>@localhost:5432/kenya_pos npm run db:migrate
-cp apps/api/.dev.vars.example apps/api/.dev.vars
+cp apps/api/.dev.vars.example apps/api/.dev.vars   # set JWT_SECRET and ENCRYPTION_KEY
 npm run dev:api   # :8787
 npm run dev:web   # :5173 (proxies /v1 to the API)
 npm run db:seed   # demo owner@demo.ke / demo-password-1

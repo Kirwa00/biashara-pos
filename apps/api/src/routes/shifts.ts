@@ -23,6 +23,12 @@ async function summary(tx: Tx, shift: postgres.Row) {
 /** FOR SHARE blocks a concurrent close until the payment commits, so the Z totals include it. */
 export const currentShiftId = (tx: Tx, userId: string) => tx`(SELECT id FROM shifts WHERE user_id = ${userId} AND status = 'OPEN' FOR SHARE)`;
 
+/** Till takings and cash refunds must land on a shift, or they'd never show up in any Z report. FOR SHARE holds off a close until commit. */
+export async function requireOpenShift(tx: Tx, userId: string) {
+  const [s] = await tx`SELECT id FROM shifts WHERE user_id = ${userId} AND status = 'OPEN' FOR SHARE`;
+  if (!s) throw new HTTPException(409, { message: "Open a till shift first" });
+}
+
 export const shiftRoutes = new Hono<AppEnv>()
   .use(requireAuth)
   .get("/shifts/current", async (c) => {
