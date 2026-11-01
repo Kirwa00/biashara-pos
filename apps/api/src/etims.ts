@@ -11,10 +11,12 @@ const MAX_ATTEMPTS = 8;
 
 /** Writes the document's tax ledger rows and queues it for eTIMS. Call inside the transaction that posts the document. */
 export async function recordFiscal(tx: Tx, bid: string, documentId: string) {
-  await tx`INSERT INTO tax_records (business_id, document_id, tax_code, rate_bp, sign, taxable_cents, tax_cents, issue_date)
-    SELECT d.business_id, d.id, l.tax_code, 0, CASE WHEN d.type = 'CREDIT_NOTE' THEN -1 ELSE 1 END, sum(l.net_cents), sum(l.tax_cents), d.issue_date
-    FROM documents d JOIN document_lines l ON l.document_id = d.id WHERE d.id = ${documentId} GROUP BY d.business_id, d.id, l.tax_code`;
-  for (const c of TAX) await tx`UPDATE tax_records SET rate_bp = ${TAX_CODES[c].rateBp} WHERE document_id = ${documentId} AND tax_code = ${c}`;
+  const groups = await tx`SELECT l.tax_code, CASE WHEN d.type = 'CREDIT_NOTE' THEN -1 ELSE 1 END AS sign, sum(l.net_cents) AS taxable, sum(l.tax_cents) AS tax, d.issue_date::text AS issue_date
+    FROM documents d JOIN document_lines l ON l.document_id = d.id WHERE d.id = ${documentId} GROUP BY l.tax_code, d.type, d.issue_date`;
+  // Append-only ledger: the app role may insert tax records but never change them.
+  for (const g of groups)
+    await tx`INSERT INTO tax_records (business_id, document_id, tax_code, rate_bp, sign, taxable_cents, tax_cents, issue_date)
+      VALUES (${bid}, ${documentId}, ${g.tax_code}, ${TAX_CODES[g.tax_code as TaxCode]?.rateBp ?? 0}, ${g.sign}, ${g.taxable}, ${g.tax}, ${g.issue_date})`;
   await tx`INSERT INTO etims_submissions (business_id, document_id, invc_no) VALUES (${bid}, ${documentId}, ${await nextNumber(tx, bid, "ETIMS")})`;
 }
 
