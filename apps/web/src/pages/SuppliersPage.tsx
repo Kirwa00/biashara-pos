@@ -9,7 +9,8 @@ type Supplier = {
   phone: string | null;
   email: string | null;
   kra_pin: string | null;
-  balance_cents: string;
+  /** Omitted for roles without reports.view. */
+  balance_cents?: string;
 };
 
 type Purchase = {
@@ -286,7 +287,7 @@ export function SuppliersPage() {
             </form>
           </Card>
 
-          <Card title="What you owe suppliers">
+          {suppliers.data.some((s) => s.balance_cents !== undefined) && <Card title="What you owe suppliers">
             {suppliers.data.filter((s) => Number(s.balance_cents) !== 0).map((s) => (
               <div key={s.id} className="flex justify-between border-t border-line py-2 text-sm"><span>{s.name}</span><span className="num font-semibold">{formatKes(Number(s.balance_cents))}</span></div>
             ))}
@@ -303,7 +304,7 @@ export function SuppliersPage() {
               <input name="reference" placeholder="Reference (optional)" className="input" />
               <button className="btn-primary w-full">Record payment</button>
             </form>
-          </Card>
+          </Card>}
 
           {/* Add Supplier Form */}
           <Card title="Register New Supplier">
