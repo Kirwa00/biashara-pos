@@ -4,12 +4,12 @@ compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-APP_ORIGIN = "http://localhost:5173"
+APP_ORIGIN = "https://kenya-pos-web.emmanuelkirwa8.workers.dev" # set to https://app.<domain> once you have a domain
 
 # Production: bind Hyperdrive (query caching DISABLED — stock/payments must never read stale rows).
-# [[hyperdrive]]
-# binding = "HYPERDRIVE"
-# id = "<hyperdrive-id>"
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "4064dafca6d14081b9ce778f678de2dc" # kpos-db: Neon biashara-pos (Frankfurt), role kpos_app, caching disabled
 # Local dev: put DATABASE_URL and JWT_SECRET in .dev.vars (see .dev.vars.example).
 
 # Sprint 8 alerts (UTC). Jobs are idempotent per Nairobi day, so a retried or overlapping run sends nothing twice.
