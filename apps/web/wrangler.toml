@@ -1,8 +1,16 @@
-# Web app: the built SPA served as Workers static assets. Deploy with `npm run build && npx wrangler deploy` from apps/web.
-# The SPA calls /v1 on its own origin: add a Workers route app.<domain>/v1/* -> kenya-pos-api. Security headers: public/_headers.
+# Web app: the built SPA as Workers static assets, with /v1 forwarded to kenya-pos-api over a service binding.
+# Deploy the API first, then `npm run build && npx wrangler deploy` here. To move to your own domain later, add
+# app.<domain> as a Custom Domain on this Worker and set the API's APP_ORIGIN to it; nothing else changes.
 name = "kenya-pos-web"
+main = "worker.js"
 compatibility_date = "2025-09-01"
 
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
+run_worker_first = ["/v1/*", "/health"]
+
+[[services]]
+binding = "API"
+service = "kenya-pos-api"
