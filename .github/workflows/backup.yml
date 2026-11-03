@@ -27,12 +27,16 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+          # R2 rejects the CRC checksum headers newer AWS CLIs send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           set -euo pipefail
           file="kenya_pos_$(date -u +%Y-%m-%dT%H%MZ).dump"
           /usr/lib/postgresql/16/bin/pg_dump --format=custom --no-owner --no-privileges "$BACKUP_DATABASE_URL" -f "$file"
           test -s "$file"
           endpoint="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          aws s3api head-bucket --bucket "${{ secrets.R2_BACKUP_BUCKET }}" --endpoint-url "$endpoint" || { echo "::error::R2 key cannot see the bucket: check the token's bucket scope and account"; exit 1; }
           aws s3 cp "$file" "s3://${{ secrets.R2_BACKUP_BUCKET }}/daily/$file" --endpoint-url "$endpoint"
           aws s3 cp "$file" "s3://${{ secrets.R2_BACKUP_BUCKET }}/latest.dump" --endpoint-url "$endpoint"
           echo "Uploaded $file ($(stat -c %s "$file") bytes)"

@@ -24,6 +24,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
           BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
         run: |
           if [ -z "$BUCKET" ]; then echo "source=seed" >> "$GITHUB_OUTPUT"; exit 0; fi
