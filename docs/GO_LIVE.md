@@ -36,7 +36,7 @@ Everything in the code is built through S10. These are the steps only the owner 
    - the `AUTH_LIMITER` and `API_LIMITER` rate limits.
 5. **Deploy the web app:** run `npm run build -w @kpos/web`, then `npx wrangler deploy` from `apps/web`.
    - Attach the custom domain `app.<domain>`.
-   - Add a Workers route `app.<domain>/v1/*` → `kenya-pos-api`. The app calls the API on its own origin.
+   - No route is needed: the web Worker forwards `/v1` to `kenya-pos-api` itself. Until you have a domain it runs at `https://kenya-pos-web.<your-subdomain>.workers.dev`; set the API's `APP_ORIGIN` to whichever address the app is served from.
 6. **WAF and rate-limit rules:** see `docs/OPERATIONS.md` §1.
 
 **Check:** `https://app.<domain>/health` returns `{"ok":true}`, and you can register a business at `https://app.<domain>/register`.

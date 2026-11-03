@@ -24,6 +24,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
           BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
         run: |
           if [ -z "$BUCKET" ]; then echo "source=seed" >> "$GITHUB_OUTPUT"; exit 0; fi
@@ -31,7 +33,13 @@ jobs:
           echo "source=r2" >> "$GITHUB_OUTPUT"
       - name: Restore backup
         if: steps.fetch.outputs.source == 'r2'
-        run: PGPASSWORD=postgres pg_restore --no-owner --no-privileges -h localhost -U postgres -d restore latest.dump
+        # Same major version as the server: newer pg_restore emits settings (transaction_timeout) Postgres 16 rejects.
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+          PGPASSWORD=postgres /usr/lib/postgresql/16/bin/pg_restore --exit-on-error --no-owner --no-privileges -h localhost -U postgres -d restore latest.dump
       - name: Seed instead (no backup configured)
         if: steps.fetch.outputs.source == 'seed'
         run: |
