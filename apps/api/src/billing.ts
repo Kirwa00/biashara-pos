@@ -73,7 +73,9 @@ export async function startPrompt(env: Env, sql: postgres.Sql, seller: string, b
     if (t.totalCents <= 0 || t.totalCents % 100 !== 0) throw new HTTPException(409, { message: "That plan's price can't be charged by M-Pesa. Please contact BiasharaPOS support." });
     // The client is an ordinary customer in the seller's books; the id is kept on the client's row (saved below).
     const [known] = client!.billing_customer_id ? await tx`SELECT id FROM customers WHERE id = ${client!.billing_customer_id}` : [];
-    const customerId = (known ?? (await tx`INSERT INTO customers (business_id, name, phone, kra_pin) VALUES (${seller}, ${client!.name}, ${client!.phone}, ${client!.kra_pin}) RETURNING id`)[0]!).id as string;
+    // Phone numbers are unique among customers, but one person can own several shops: leave it blank rather than merge their accounts.
+    const phoneFree = client!.phone && !(await tx`SELECT 1 FROM customers WHERE phone = ${client!.phone}`).length;
+    const customerId = (known ?? (await tx`INSERT INTO customers (business_id, name, phone, kra_pin) VALUES (${seller}, ${client!.name}, ${phoneFree ? client!.phone : null}, ${client!.kra_pin}) RETURNING id`)[0]!).id as string;
     return { s, customerId, amount: t.totalCents,
       line: { product_id: p.id as string, description: p.name as string, unit_price_cents: String(p.retail_price_cents), tax_code: p.tax_code as string, net_cents: String(t.netCents), tax_cents: String(t.taxCents), total_cents: String(t.totalCents) } };
   });
