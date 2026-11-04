@@ -1,4 +1,4 @@
-import { loginSchema, registerSchema, type Role } from "@kpos/shared";
+import { loginSchema, registerSchema, tillSignInSchema, type Role } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -17,6 +17,26 @@ async function issueTokens(tx: postgres.TransactionSql, secret: string, user: { 
   await tx`INSERT INTO refresh_tokens (business_id, user_id, token_hash, expires_at)
     VALUES (${user.businessId}, ${user.id}, ${await sha256(refreshToken)}, now() + ${REFRESH_TTL_S + " seconds"}::interval)`;
   return { accessToken: await signAccess(secret, user), refreshToken };
+}
+
+/** Counts a wrong password or PIN; five in a row lock the login for LOCK_MINUTES. */
+async function recordFailedLogin(sql: postgres.Sql, u: postgres.Row, ip?: string) {
+  await withTenant(sql, u.business_id, async (tx) => {
+    await tx`UPDATE users SET failed_logins = failed_logins + 1,
+      locked_until = CASE WHEN failed_logins + 1 >= ${MAX_FAILED} THEN now() + ${LOCK_MINUTES + " minutes"}::interval END WHERE id = ${u.id}`;
+    await audit(tx, { businessId: u.business_id, userId: u.id, action: "auth.login_failed", entity: "user", entityId: u.id, ip });
+  });
+}
+
+/** The right credentials were given: refuse suspended businesses, clear the failure count and start a session. */
+function completeLogin(sql: postgres.Sql, secret: string, u: postgres.Row, ip?: string) {
+  return withTenant(sql, u.business_id, async (tx) => {
+    const [biz] = await tx`SELECT status FROM businesses WHERE id = ${u.business_id}`;
+    if (biz?.status === "SUSPENDED") throw new HTTPException(403, { message: SUSPENDED });
+    await tx`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ${u.id}`;
+    await audit(tx, { businessId: u.business_id, userId: u.id, action: "auth.login", entity: "user", entityId: u.id, ip });
+    return issueTokens(tx, secret, { id: u.id, businessId: u.business_id, role: u.role });
+  });
 }
 
 export const authRoutes = new Hono<AppEnv>()
@@ -45,20 +65,25 @@ export const authRoutes = new Hono<AppEnv>()
     if (!u || !u.is_active) throw new HTTPException(401, { message: "Wrong email or password" });
     if (u.locked_until && new Date(u.locked_until) > new Date()) throw new HTTPException(423, { message: "Account locked. Try again later." });
     if (!ok) {
-      await withTenant(sql, u.business_id, async (tx) => {
-        await tx`UPDATE users SET failed_logins = failed_logins + 1,
-          locked_until = CASE WHEN failed_logins + 1 >= ${MAX_FAILED} THEN now() + ${LOCK_MINUTES + " minutes"}::interval END WHERE id = ${u.id}`;
-        await audit(tx, { businessId: u.business_id, userId: u.id, action: "auth.login_failed", entity: "user", entityId: u.id, ip: c.req.header("cf-connecting-ip") });
-      });
+      await recordFailedLogin(sql, u, c.req.header("cf-connecting-ip"));
       throw new HTTPException(401, { message: "Wrong email or password" });
     }
-    return withTenant(sql, u.business_id, async (tx) => {
-      const [biz] = await tx`SELECT status FROM businesses WHERE id = ${u.business_id}`;
-      if (biz?.status === "SUSPENDED") throw new HTTPException(403, { message: SUSPENDED });
-      await tx`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ${u.id}`;
-      await audit(tx, { businessId: u.business_id, userId: u.id, action: "auth.login", entity: "user", entityId: u.id, ip: c.req.header("cf-connecting-ip") });
-      return c.json(await issueTokens(tx, c.env.JWT_SECRET, { id: u.id, businessId: u.business_id, role: u.role }));
-    });
+    return c.json(await completeLogin(sql, c.env.JWT_SECRET, u, c.req.header("cf-connecting-ip")));
+  })
+  /** Tellers: shop code, username and PIN. Every failure reads the same, so it can't be used to find shops or usernames. */
+  .post("/till", zValidator("json", tillSignInSchema), async (c) => {
+    const { shopCode, username, pin } = c.req.valid("json");
+    const sql = c.get("sql");
+    const wrong = new HTTPException(401, { message: "Wrong shop code, username or PIN" });
+    const [u] = await sql`SELECT * FROM till_lookup(${shopCode}, ${username})`;
+    const ok = u ? await verifyPassword(pin, u.pin_hash) : await verifyPassword(pin, "pbkdf2$1$AA==$AA==");
+    if (!u || !u.is_active) throw wrong;
+    if (u.locked_until && new Date(u.locked_until) > new Date()) throw new HTTPException(423, { message: "Too many wrong PINs. Try again in 15 minutes, or ask the owner to set a new PIN." });
+    if (!ok) {
+      await recordFailedLogin(sql, u, c.req.header("cf-connecting-ip"));
+      throw wrong;
+    }
+    return c.json(await completeLogin(sql, c.env.JWT_SECRET, u, c.req.header("cf-connecting-ip")));
   })
   .post("/refresh", async (c) => {
     const { refreshToken } = await c.req.json<{ refreshToken?: string }>();

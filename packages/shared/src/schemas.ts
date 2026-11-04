@@ -14,12 +14,21 @@ export const registerSchema = z.object({
 export type RegisterInput = z.infer<typeof registerSchema>;
 
 /** Owners change a team member's role or switch them off; switching off ends their sessions. */
+/** Four digits, and not one of the PINs anyone would try first. */
+const WEAK_PINS = new Set(["0123", "1234", "2345", "3456", "4567", "5678", "6789", "9876", "8765", "7654", "6543", "5432", "4321", "3210"]);
+export const tillPin = z.string().regex(/^\d{4}$/, "The PIN must be 4 digits")
+  .refine((p) => !WEAK_PINS.has(p) && !/^(\d)\1{3}$/.test(p), "That PIN is too easy to guess. Choose a less obvious one");
+export const tillUsername = z.string().trim().regex(/^[A-Za-z0-9._-]{3,30}$/, "Use 3 to 30 letters or numbers, with no spaces").transform((u) => u.toLowerCase());
+export const createTillLoginSchema = z.object({ name: z.string().trim().min(2).max(120), username: tillUsername, pin: tillPin, branchId: z.string().uuid().optional() });
+export const tillSignInSchema = z.object({ shopCode: z.string().trim().min(4).max(12), username: tillUsername, pin: z.string().regex(/^\d{4}$/) });
+
 export const updateUserSchema = z.object({
   role: z.enum(["MANAGER", "ACCOUNTANT", "CASHIER"]).optional(),
   isActive: z.boolean().optional(),
   /** The owner sets a new password for staff who forget theirs. */
   password: z.string().min(10, "Use at least 10 characters").optional(),
-}).refine((v) => v.role !== undefined || v.isActive !== undefined || v.password !== undefined, "Nothing to change");
+  pin: tillPin.optional(),
+}).refine((v) => v.role !== undefined || v.isActive !== undefined || v.password !== undefined || v.pin !== undefined, "Nothing to change");
 
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export type LoginInput = z.infer<typeof loginSchema>;

@@ -46,6 +46,7 @@ createRoot(document.getElementById("root")!).render(
       <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/login" element={<AuthPage mode="login" />} />
+        <Route path="/till-login" element={<AuthPage mode="till" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
         <Route
           path="/receipt/:id"
