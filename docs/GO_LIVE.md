@@ -22,7 +22,7 @@ Everything in the code is built through S10. These are the steps only the owner 
 
 ## 2. Cloudflare
 
-1. Add your domain as a Cloudflare zone. A `.co.ke` domain works: change the nameservers at your registrar.
+1. The domain is `biasharapos.com`, bought through Cloudflare, so the zone already exists and there are no nameservers to change.
 2. **Hyperdrive:** create one pointing at the Neon `kpos_app` connection string, with **query caching off**. Put its id in `apps/api/wrangler.toml` by uncommenting the `[[hyperdrive]]` block.
 3. **Secrets** for the API Worker, run from `apps/api`:
    ```bash
@@ -30,16 +30,16 @@ Everything in the code is built through S10. These are the steps only the owner 
    npx wrangler secret put ENCRYPTION_KEY    # 32+ random bytes; encrypts PayHero passwords and the eTIMS key. Never change it once set.
    npx wrangler secret put RESEND_API_KEY    # step 5
    ```
-   Set the plain variables `APP_ORIGIN=https://app.<domain>` and `EMAIL_FROM="BiasharaPOS <alerts@<domain>>"` in `[vars]` or in the dashboard.
+   `APP_ORIGIN` and `EMAIL_FROM` are already set in `[vars]` in `apps/api/wrangler.toml`. `keep_vars` is on, so a deploy leaves variables set in the dashboard alone.
 4. **Deploy the API:** run `npm run build -w @kpos/api`, then `npx wrangler deploy` from `apps/api`. That one deploy also sets up:
    - the cron triggers (08:00 and 20:00 EAT, and eTIMS every 15 minutes);
    - the `AUTH_LIMITER` and `API_LIMITER` rate limits.
 5. **Deploy the web app:** run `npm run build -w @kpos/web`, then `npx wrangler deploy` from `apps/web`.
-   - Attach the custom domain `app.<domain>`.
-   - No route is needed: the web Worker forwards `/v1` to `kenya-pos-api` itself. Until you have a domain it runs at `https://kenya-pos-web.<your-subdomain>.workers.dev`; set the API's `APP_ORIGIN` to whichever address the app is served from.
+   - `apps/web/wrangler.toml` attaches `biasharapos.com` and `www.biasharapos.com` as custom domains on deploy; `www` redirects to the main address.
+   - No route is needed: the web Worker forwards `/v1` to `kenya-pos-api` itself. The old `https://kenya-pos-web.<your-subdomain>.workers.dev` address keeps working so tills can sync queued offline sales. Sign-ins and installed till apps don't carry over between addresses: sync first, then sign in and reinstall on the new one.
 6. **WAF and rate-limit rules:** see `docs/OPERATIONS.md` §1.
 
-**Check:** `https://app.<domain>/health` returns `{"ok":true}`, and you can register a business at `https://app.<domain>/register`.
+**Check:** `https://biasharapos.com/health` returns `{"ok":true}`, `https://www.biasharapos.com/` redirects to `https://biasharapos.com/`, and you can register a business at `https://biasharapos.com/register`.
 
 ## 3. PayHero (M-Pesa STK)
 
@@ -86,7 +86,7 @@ Everything in the code is built through S10. These are the steps only the owner 
 
 ## 7. Platform admin (you)
 
-1. Register your own account at `https://app.<domain>/register`. Use any business name, e.g. "BiasharaPOS HQ".
+1. Register your own account at `https://biasharapos.com/register`. Use any business name, e.g. "BiasharaPOS HQ".
 2. **Only after that account exists**, set the Worker variable `SUPER_ADMIN_EMAILS` to your email (comma-separate several). Registering first matters: until an email is registered, anyone could register it.
 3. Sign in again. **Platform Admin** appears in the sidebar:
    - see every business, with its owner, status, users, 30-day sales and last activity;
