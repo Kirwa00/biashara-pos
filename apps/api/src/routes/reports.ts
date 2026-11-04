@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
 import { audit, withTenant } from "../db";
+import { integrityReport } from "../integrity";
 import { resolveBranch } from "./stock";
 import type { AppEnv } from "../env";
 import type postgres from "postgres";
@@ -15,7 +16,7 @@ const range = (q: (k: string) => string | undefined) => {
 };
 
 /** One row per tracked product at or below its reorder level, stock summed across branches (no balance row = 0). */
-const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
+export const lowStock = (tx: postgres.TransactionSql) => tx`SELECT p.id, p.sku, p.name, coalesce(sum(b.on_hand), 0) AS on_hand, p.reorder_level
   FROM products p LEFT JOIN stock_balances b ON b.product_id = p.id
   WHERE p.is_active AND p.track_stock AND p.reorder_level > 0
   GROUP BY p.id HAVING coalesce(sum(b.on_hand), 0) <= p.reorder_level`;
@@ -138,6 +139,9 @@ export const reportRoutes = new Hono<AppEnv>()
       return e;
     }), 201);
   })
+  /** Books check: stock ledger, document totals, payments and tax ledger all reconcile. */
+  .get("/reports/integrity", requirePermission("reports.view"), async (c) =>
+    c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) => integrityReport(tx, c.get("auth").bid))))
   .get("/reports/alerts", requirePermission("reports.view"), async (c) =>
     c.json(await withTenant(c.get("sql"), c.get("auth").bid, async (tx) => ({
       low_stock: await tx`SELECT * FROM (${lowStock(tx)}) x ORDER BY x.on_hand - x.reorder_level LIMIT 20`,

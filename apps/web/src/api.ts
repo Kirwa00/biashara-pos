@@ -11,6 +11,23 @@ export const session = {
   },
 };
 
+/** Platform-admin support view: park the admin's own session, browse as the shop owner (read-only), then restore it. */
+const ADMIN_KEY = "kpos.session.admin";
+export const support = {
+  start: (accessToken: string) => {
+    localStorage.setItem(ADMIN_KEY, localStorage.getItem(KEY) ?? "null");
+    session.clear();
+    session.set({ accessToken, refreshToken: "" });
+  },
+  active: () => localStorage.getItem(ADMIN_KEY) !== null,
+  exit: () => {
+    const saved = localStorage.getItem(ADMIN_KEY);
+    localStorage.removeItem(ADMIN_KEY);
+    session.clear();
+    if (saved && saved !== "null") localStorage.setItem(KEY, saved);
+  },
+};
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -19,7 +36,8 @@ async function refresh(): Promise<boolean> {
   const s = session.get();
   if (!s) return false;
   const res = await fetch("/v1/auth/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshToken: s.refreshToken }) });
-  if (!res.ok) { session.clear(); return false; }
+  // A support view has no refresh token: when it expires, drop back to the admin's own session.
+  if (!res.ok) { if (support.active()) support.exit(); else session.clear(); return false; }
   session.set(await res.json());
   return true;
 }

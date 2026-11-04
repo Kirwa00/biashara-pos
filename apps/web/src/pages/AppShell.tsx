@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { Suspense, useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { formatKes } from "@kpos/shared";
-import { api, session } from "../api";
+import { api, session, support } from "../api";
+import { Loading } from "./ui";
 
 type Me = {
   user: { name: string; role: string };
   business: { name: string; kra_pin?: string | null };
+  isSuperAdmin?: boolean;
+  supportSession?: boolean;
 };
 
 type ShiftSummary = {
@@ -21,6 +24,7 @@ const NAV = [
   { to: "/sales", label: "Sales & Invoices" },
   { to: "/returns", label: "Returns & Credit Notes" },
   { to: "/inventory", label: "Stock & Movements" },
+  { to: "/transfers", label: "Branch Transfers" },
   { to: "/suppliers", label: "Suppliers & GRNs" },
   { to: "/purchase-orders", label: "Purchase Orders" },
   { to: "/reports", label: "Financial Reports" },
@@ -28,6 +32,7 @@ const NAV = [
   { to: "/products", label: "Products & Catalog" },
   { to: "/customers", label: "Customers & Debtors" },
   { to: "/reminders", label: "Payment Reminders" },
+  { to: "/notifications", label: "Notifications" },
   { to: "/team", label: "Team & Branches" },
   { to: "/settings/payments", label: "PayHero Settings" },
 ];
@@ -35,7 +40,24 @@ const NAV = [
 export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
   const [currentShift, setCurrentShift] = useState<ShiftSummary | null>(null);
+  const [unread, setUnread] = useState(0);
+  const [install, setInstall] = useState<{ prompt: () => Promise<void> } | null>(null);
   const nav = useNavigate();
+  const { pathname } = useLocation();
+
+  // Chrome/Edge/Android offer installation once the PWA criteria are met; we surface it as a header button.
+  useEffect(() => {
+    const offer = (e: Event) => { e.preventDefault(); setInstall(e as unknown as { prompt: () => Promise<void> }); };
+    const done = () => setInstall(null);
+    window.addEventListener("beforeinstallprompt", offer);
+    window.addEventListener("appinstalled", done);
+    return () => { window.removeEventListener("beforeinstallprompt", offer); window.removeEventListener("appinstalled", done); };
+  }, []);
+
+  // Cashiers can't see notifications (403); the bell just stays at zero.
+  useEffect(() => {
+    api<{ unread: number }>("/notifications?unread=1").then((n) => setUnread(n.unread)).catch(() => {});
+  }, [pathname]);
 
   useEffect(() => {
     api<Me>("/me")
@@ -51,6 +73,7 @@ export function AppShell() {
   }, [nav]);
 
   async function logout() {
+    if (support.active()) { support.exit(); window.location.href = "/admin"; return; }
     await api("/auth/logout", { method: "POST" }).catch(() => {});
     session.clear();
     nav("/login");
@@ -70,7 +93,7 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto">
-          {NAV.map((n) => (
+          {(me?.isSuperAdmin ? [...NAV, { to: "/admin", label: "Platform Admin" }] : NAV).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -88,11 +111,7 @@ export function AppShell() {
 
         {/* Sidebar Footer */}
         <div className="mt-4 border-t border-slate-800 pt-4 px-3 text-xs text-slate-400 space-y-1">
-          <div className="flex items-center gap-1.5 text-emerald-400">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>eTIMS VSCU Connected</span>
-          </div>
-          <p className="text-[11px] text-slate-500">KRA-VSCU-7801-NW</p>
+          <NavLink to="/etims" className="hover:text-white">eTIMS status: Tax Center</NavLink>
         </div>
       </aside>
 
@@ -123,6 +142,17 @@ export function AppShell() {
               {currentShift ? `Till Shift: ${formatKes(currentShift.expected_cash_cents)}` : "No Shift Open"}
             </NavLink>
 
+            {install && (
+              <button onClick={() => install.prompt().finally(() => setInstall(null))} className="hidden sm:inline-flex rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white hover:bg-primary-active transition">
+                Install app
+              </button>
+            )}
+
+            <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-ink transition">
+              Alerts
+              {unread > 0 && <span className="num absolute -right-1.5 -top-1.5 rounded-full bg-critical px-1.5 text-[10px] font-bold text-white">{unread}</span>}
+            </NavLink>
+
             {/* Offline / Online indicator */}
             <span className="hidden lg:inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -135,8 +165,16 @@ export function AppShell() {
           </div>
         </header>
 
+        {me?.supportSession && (
+          <div className="flex items-center justify-between gap-3 bg-amber-100 px-6 py-2 text-sm text-amber-900">
+            <span><strong>Support view</strong> of {me.business.name}: read-only, ends after 15 minutes.</span>
+            <button onClick={() => { support.exit(); window.location.href = "/admin"; }} className="rounded-lg bg-amber-900 px-3 py-1 text-xs font-semibold text-white">Exit support view</button>
+          </div>
+        )}
         <main className="flex-1 p-6 overflow-y-auto">
-          <Outlet />
+          <Suspense fallback={<Loading />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

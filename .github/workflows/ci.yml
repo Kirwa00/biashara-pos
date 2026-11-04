@@ -20,4 +20,7 @@ jobs:
         env: { MIGRATE_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/kenya_pos" }
       - run: npm run typecheck
       - run: npm test
+      - name: Books reconcile across all test data
+        run: npm run db:verify -w @kpos/api
+        env: { VERIFY_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/kenya_pos" }
       - run: npm run build

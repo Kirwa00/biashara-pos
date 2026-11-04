@@ -2,12 +2,31 @@ name = "kenya-pos-api"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
+keep_vars = true # a deploy must not wipe variables set in the dashboard, e.g. SUPER_ADMIN_EMAILS
 
 [vars]
-APP_ORIGIN = "http://localhost:5173"
+APP_ORIGIN = "https://biasharapos.com"
+EMAIL_FROM = "BiasharaPOS <alerts@biasharapos.com>"
 
 # Production: bind Hyperdrive (query caching DISABLED — stock/payments must never read stale rows).
-# [[hyperdrive]]
-# binding = "HYPERDRIVE"
-# id = "<hyperdrive-id>"
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "4064dafca6d14081b9ce778f678de2dc" # kpos-db: Neon biashara-pos (Frankfurt), role kpos_app, caching disabled
 # Local dev: put DATABASE_URL and JWT_SECRET in .dev.vars (see .dev.vars.example).
+
+# Sprint 8 alerts (UTC). Jobs are idempotent per Nairobi day, so a retried or overlapping run sends nothing twice.
+# 05:00 = 08:00 EAT low stock, overdue, M-Pesa issues, POs, eTIMS issues; 17:00 = 20:00 EAT daily owner summary; */15 eTIMS submission queue.
+# Owner email needs `wrangler secret put RESEND_API_KEY` and biasharapos.com verified in Resend; without the key alerts stay in-app.
+[triggers]
+crons = ["0 5 * * *", "0 17 * * *", "*/15 * * * *"]
+
+# Per-IP limits (Workers Rate Limiting). namespace_id is any account-unique integer; period must be 10 or 60 seconds.
+[[ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "API_LIMITER"
+namespace_id = "1002"
+simple = { limit = 600, period = 60 }

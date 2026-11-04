@@ -13,6 +13,12 @@ export const registerSchema = z.object({
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+/** Owners change a team member's role or switch them off; switching off ends their sessions. */
+export const updateUserSchema = z.object({
+  role: z.enum(["MANAGER", "ACCOUNTANT", "CASHIER"]).optional(),
+  isActive: z.boolean().optional(),
+}).refine((v) => v.role !== undefined || v.isActive !== undefined, "Nothing to change");
+
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export type LoginInput = z.infer<typeof loginSchema>;
 
@@ -163,4 +169,39 @@ export const receiveOrderSchema = z.object({
   supplierRef: z.string().trim().max(60).optional(),
   lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") })).min(1).max(200)
     .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once per receipt"),
+});
+
+/** OSCU device registration from KRA onboarding; the communication key is stored encrypted. */
+export const etimsSettingsSchema = z.object({
+  environment: z.enum(["SANDBOX", "PRODUCTION"]).default("SANDBOX"),
+  tin: kraPin,
+  bhfId: z.string().regex(/^\d{2}$/, "Branch ID is two digits, e.g. 00").default("00"),
+  deviceSerial: z.string().min(3).max(60),
+  cmcKey: z.string().min(8).max(200),
+  enabled: z.boolean().default(false),
+});
+export type EtimsSettingsInput = z.infer<typeof etimsSettingsSchema>;
+
+/** KRA codes for a product: registered item code, item classification, quantity and packaging units. */
+export const kraCodesSchema = z.object({
+  itemCode: z.string().min(1).max(20),
+  itemClassCode: z.string().regex(/^\d{4,10}$/, "Item class codes are digits"),
+  unitCode: z.string().min(1).max(5).default("U"),
+  pkgUnitCode: z.string().min(1).max(5).default("NT"),
+});
+export type KraCodesInput = z.infer<typeof kraCodesSchema>;
+
+/** Move stock from one branch to another; nothing changes until it is sent. */
+export const transferSchema = z.object({
+  fromBranchId: z.string().uuid(),
+  toBranchId: z.string().uuid(),
+  note: z.string().trim().max(200).optional(),
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive") })).min(1).max(500)
+    .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once per transfer"),
+}).refine((t) => t.fromBranchId !== t.toBranchId, "Pick two different branches");
+
+/** Quantities that actually arrived; omit to accept everything that was sent. */
+export const transferReceiveSchema = z.object({
+  lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n >= 0, "Cannot be negative") })).max(500)
+    .refine((ls) => new Set(ls.map((l) => l.productId)).size === ls.length, "Each product once").optional(),
 });

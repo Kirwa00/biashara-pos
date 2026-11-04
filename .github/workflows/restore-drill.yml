@@ -1,0 +1,54 @@
+name: Restore drill
+# Monthly (and on demand): restore the latest R2 backup into a throwaway Postgres 16 and prove the books reconcile.
+# Same secrets as the nightly backup. Without them it fills a fresh database with the API test suite instead, so the drill itself stays tested.
+on:
+  schedule: [{ cron: "0 6 1 * *" }]
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: restore }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Fetch latest backup
+        id: fetch
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
+        run: |
+          if [ -z "$BUCKET" ]; then echo "source=seed" >> "$GITHUB_OUTPUT"; exit 0; fi
+          aws s3 cp "s3://$BUCKET/latest.dump" latest.dump --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          echo "source=r2" >> "$GITHUB_OUTPUT"
+      - name: Restore backup
+        if: steps.fetch.outputs.source == 'r2'
+        # Same major version as the server: newer pg_restore emits settings (transaction_timeout) Postgres 16 rejects.
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+          PGPASSWORD=postgres /usr/lib/postgresql/16/bin/pg_restore --exit-on-error --no-owner --no-privileges -h localhost -U postgres -d restore latest.dump
+      - name: Seed instead (no backup configured)
+        if: steps.fetch.outputs.source == 'seed'
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d restore -c "CREATE ROLE kpos_app LOGIN PASSWORD 'app';"
+          npm run db:migrate
+          npm test -w @kpos/api
+        env:
+          MIGRATE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/restore
+          DATABASE_URL: postgres://kpos_app:app@localhost:5432/restore
+      - name: Verify the restored books reconcile
+        run: npm run db:verify -w @kpos/api
+        env: { VERIFY_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/restore" }

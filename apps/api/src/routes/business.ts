@@ -1,4 +1,4 @@
-import { createBranchSchema, createUserSchema } from "@kpos/shared";
+import { createBranchSchema, createUserSchema, updateUserSchema } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -6,15 +6,17 @@ import { requireAuth, requirePermission } from "../auth";
 import { hashPassword } from "../crypto";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
+import { isSuperAdmin } from "./admin";
 
 export const businessRoutes = new Hono<AppEnv>()
   .use(requireAuth)
   .get("/me", async (c) => {
-    const { sub, bid } = c.get("auth");
+    const { sub, bid, imp } = c.get("auth");
+    const superAdmin = await isSuperAdmin(c.env, c.get("sql"), c.get("auth"));
     return withTenant(c.get("sql"), bid, async (tx) => {
       const [user] = await tx`SELECT id, name, email, role, branch_id FROM users WHERE id = ${sub}`;
       const [business] = await tx`SELECT id, name, kra_pin, phone, currency, timezone, status FROM businesses WHERE id = ${bid}`;
-      return c.json({ user, business });
+      return c.json({ user, business, isSuperAdmin: superAdmin, supportSession: !!imp });
     });
   })
   .get("/branches", async (c) =>
@@ -47,6 +49,23 @@ export const businessRoutes = new Hono<AppEnv>()
       return u;
     });
     return c.json(user, 201);
+  })
+  .patch("/users/:id", requirePermission("users.manage"), zValidator("json", updateUserSchema), async (c) => {
+    const { sub, bid } = c.get("auth");
+    const id = c.req.param("id");
+    const b = c.req.valid("json");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new HTTPException(404, { message: "User not found" });
+    if (id === sub) throw new HTTPException(409, { message: "You cannot change your own account here" });
+    return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
+      const [before] = await tx`SELECT id, role, is_active FROM users WHERE id = ${id} FOR UPDATE`;
+      if (!before) throw new HTTPException(404, { message: "User not found" });
+      if (before.role === "OWNER") throw new HTTPException(409, { message: "Owners cannot be changed here" });
+      const [u] = await tx`UPDATE users SET role = ${b.role ?? before.role}, is_active = ${b.isActive ?? before.is_active} WHERE id = ${id} RETURNING id, name, email, role, is_active`;
+      // Access tokens expire within 15 minutes; revoking refresh tokens stops them being renewed.
+      if (b.isActive === false) await tx`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ${id} AND revoked_at IS NULL`;
+      await audit(tx, { businessId: bid, userId: sub, action: "user.update", entity: "user", entityId: id, before, after: u });
+      return u;
+    }));
   })
   .get("/audit", requirePermission("audit.view"), async (c) =>
     c.json(await withTenant(c.get("sql"), c.get("auth").bid, (tx) =>

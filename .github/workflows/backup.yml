@@ -1,0 +1,57 @@
+name: Nightly backup
+# 02:30 EAT. Logical dump of the production database to private R2 storage (30-day lifecycle set on the bucket).
+# Needs repository secrets: BACKUP_DATABASE_URL (direct Neon URL, not Hyperdrive), R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BACKUP_BUCKET.
+on:
+  schedule: [{ cron: "30 23 * * *" }]
+  workflow_dispatch:
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secrets
+        id: cfg
+        env:
+          DB: ${{ secrets.BACKUP_DATABASE_URL }}
+          BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
+          ACCOUNT: ${{ secrets.R2_ACCOUNT_ID }}
+          KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # Nothing configured yet: skip quietly. Partly configured: fail, so a missing secret never looks like a good backup.
+          if [ -z "$DB$BUCKET$ACCOUNT$KEY$SECRET" ]; then echo "Backup secrets not set; skipping."; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          missing=""; for v in DB BUCKET ACCOUNT KEY SECRET; do [ -n "${!v}" ] || missing="$missing $v"; done
+          if [ -n "$missing" ]; then echo "::error::Backup secrets missing:$missing (DB=BACKUP_DATABASE_URL, BUCKET=R2_BACKUP_BUCKET, ACCOUNT=R2_ACCOUNT_ID, KEY=R2_ACCESS_KEY_ID, SECRET=R2_SECRET_ACCESS_KEY)"; exit 1; fi
+      - name: Install pg_dump 16
+        if: steps.cfg.outputs.skip != 'true'
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+      - name: Dump and upload
+        if: steps.cfg.outputs.skip != 'true'
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the CRC checksum headers newer AWS CLIs send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set -euo pipefail
+          file="kenya_pos_$(date -u +%Y-%m-%dT%H%MZ).dump"
+          /usr/lib/postgresql/16/bin/pg_dump --format=custom --no-owner --no-privileges "$BACKUP_DATABASE_URL" -f "$file"
+          test -s "$file"
+          endpoint="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          aws s3api head-bucket --bucket "${{ secrets.R2_BACKUP_BUCKET }}" --endpoint-url "$endpoint" || { echo "::error::R2 key cannot see the bucket: check the token's bucket scope and account"; exit 1; }
+          if ! aws s3 cp "$file" "s3://${{ secrets.R2_BACKUP_BUCKET }}/daily/$file" --endpoint-url "$endpoint"; then
+            echo "--- R2 diagnostics ---"; aws --version
+            aws s3 ls "s3://${{ secrets.R2_BACKUP_BUCKET }}/" --endpoint-url "$endpoint" >/dev/null 2>&1 && echo "list: allowed" || echo "list: DENIED"
+            echo probe > probe.txt
+            aws s3api put-object --bucket "${{ secrets.R2_BACKUP_BUCKET }}" --key probe.txt --body probe.txt --endpoint-url "$endpoint" --debug > probe.log 2>&1 || true
+            grep -iE "Code>|Message>|x-amz-checksum|x-amz-sdk-checksum|aws-cli/" probe.log | grep -v Authorization | head -12 || true
+            exit 1
+          fi
+          aws s3 cp "$file" "s3://${{ secrets.R2_BACKUP_BUCKET }}/latest.dump" --endpoint-url "$endpoint"
+          echo "Uploaded $file ($(stat -c %s "$file") bytes)"
