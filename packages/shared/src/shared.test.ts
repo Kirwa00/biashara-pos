@@ -35,6 +35,8 @@ describe("permissions", () => {
   it("cashier cannot adjust stock or override discounts", () => {
     expect(can("CASHIER", "sales.create")).toBe(true);
     expect(can("CASHIER", "stock.adjust")).toBe(false);
+    expect(can("CASHIER", "documents.create")).toBe(true);
+    for (const p of ["stock.view", "invoices.manage", "reports.view", "catalog.manage", "users.manage", "settings.payments", "billing.manage", "sales.refund"] as const) expect(can("CASHIER", p)).toBe(false);
     expect(can("CASHIER", "sales.discount.override")).toBe(false);
     expect(can("OWNER", "settings.payments")).toBe(true);
     expect(can("MANAGER", "settings.payments")).toBe(false);

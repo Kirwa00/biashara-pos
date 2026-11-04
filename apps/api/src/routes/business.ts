@@ -65,10 +65,13 @@ export const businessRoutes = new Hono<AppEnv>()
       const [before] = await tx`SELECT id, role, is_active FROM users WHERE id = ${id} FOR UPDATE`;
       if (!before) throw new HTTPException(404, { message: "User not found" });
       if (before.role === "OWNER") throw new HTTPException(409, { message: "Owners cannot be changed here" });
-      const [u] = await tx`UPDATE users SET role = ${b.role ?? before.role}, is_active = ${b.isActive ?? before.is_active} WHERE id = ${id} RETURNING id, name, email, role, is_active`;
+      const passwordHash = b.password ? await hashPassword(b.password) : null;
+      const [u] = await tx`UPDATE users SET role = ${b.role ?? before.role}, is_active = ${b.isActive ?? before.is_active},
+        password_hash = coalesce(${passwordHash}, password_hash), failed_logins = ${passwordHash ? tx`0` : tx`failed_logins`}, locked_until = ${passwordHash ? tx`NULL` : tx`locked_until`}
+        WHERE id = ${id} RETURNING id, name, email, role, is_active`;
       // Access tokens expire within 15 minutes; revoking refresh tokens stops them being renewed.
-      if (b.isActive === false) await tx`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ${id} AND revoked_at IS NULL`;
-      await audit(tx, { businessId: bid, userId: sub, action: "user.update", entity: "user", entityId: id, before, after: u });
+      if (b.isActive === false || passwordHash) await tx`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ${id} AND revoked_at IS NULL`;
+      await audit(tx, { businessId: bid, userId: sub, action: "user.update", entity: "user", entityId: id, before, after: { ...u, passwordChanged: !!passwordHash } });
       return u;
     }));
   })
