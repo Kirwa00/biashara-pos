@@ -60,6 +60,10 @@ export async function api<T>(path: string, init: RequestInit = {}, retry = true)
     headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...init.headers },
   });
   if (res.status === 401 && retry && (await refresh())) return api<T>(path, init, false);
-  if (!res.ok) throw new ApiError(res.status, ((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.statusText);
+  if (!res.ok) {
+    // Validation failures carry an object in `error`, which isn't fit to show as a message.
+    const { error } = (await res.json().catch(() => ({}))) as { error?: unknown };
+    throw new ApiError(res.status, typeof error === "string" ? error : res.status === 400 ? "Please check the details and try again." : res.statusText);
+  }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
