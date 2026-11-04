@@ -59,15 +59,22 @@ export function TillPage() {
     return () => { window.removeEventListener("online", sync); clearInterval(t); };
   }, []);
 
-  // After an STK prompt, poll the payment until PayHero's callback confirms or fails it (~2 min).
-  const pollStk = async (paymentId: string, phone: string) => {
+  // The sale is recorded by the server once PayHero confirms the money, so the cart stays until then (~2 min).
+  const pollStk = async (promptId: string, phone: string) => {
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 3000));
-      const p = await api<{ status: string; reference: string | null }>(`/payments/${paymentId}`).catch(() => null);
-      if (p?.status === "CONFIRMED") { setMsg(`M-Pesa payment received from ${phone} (${p.reference}).`); shift.reload(); return; }
-      if (p?.status === "FAILED") { setMsg(`M-Pesa prompt to ${phone} failed or was cancelled. The sale is unpaid: take another payment method.`); return; }
+      const p = await api<{ status: string; reference: string | null; error: string | null; document_id: string | null; number: number | null; total_cents: string | null }>(`/payments/till-prompts/${promptId}`).catch(() => null);
+      if (p?.status === "CONFIRMED") {
+        setMsg(`M-Pesa payment received from ${phone} (${p.reference}).`);
+        setLastSale({ id: p.document_id!, number: p.number!, total_cents: p.total_cents!, change_cents: 0 });
+        setCart([]);
+        shift.reload();
+        return;
+      }
+      if (p?.status === "FAILED") { setMsg(`M-Pesa prompt to ${phone} failed or was cancelled. No money was taken and no sale was recorded: try again or take another payment method.`); return; }
+      if (p?.status === "REVIEW") { setMsg(`The customer paid${p.reference ? ` (${p.reference})` : ""}, but the sale couldn't be recorded: ${p.error}. Keep this code and call the owner.`); return; }
     }
-    setMsg(`No M-Pesa confirmation from ${phone} after 2 minutes. Check the customer's phone, or record the M-Pesa code on the invoice.`);
+    setMsg(`No M-Pesa confirmation from ${phone} after 2 minutes. If they paid, the sale will appear in Sales & Invoices on its own. Check there before sending another prompt.`);
   };
 
   // Auto-focus search input on mount
@@ -165,6 +172,20 @@ export function TillPage() {
     setMsg("");
 
     try {
+      // Nothing is recorded until the customer has paid: no sale, stock movement or KRA submission for a cancelled prompt.
+      if (tenderMode === "MPESA_STK") {
+        const phone = mpesaPhone.trim();
+        if (!phone) throw new Error("Please enter phone number for M-Pesa STK Push");
+        const { promptId } = await api<{ promptId: string }>("/payments/till-prompts", {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), phone, expectedTotalCents: cartTotalCents, customerId: selectedCustomer?.id || undefined,
+            lines: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })) }),
+        });
+        setMsg(`M-Pesa prompt sent to ${phone}. Waiting for the customer to enter their PIN…`);
+        await pollStk(promptId, phone);
+        return;
+      }
+
       let payments: { method: string; amountCents: number; reference?: string }[] = [];
 
       if (tenderMode === "CASH") {
@@ -179,7 +200,6 @@ export function TillPage() {
         payments = []; // Unpaid invoice / credit sale
       }
 
-      if (tenderMode === "MPESA_STK" && !mpesaPhone.trim()) throw new Error("Please enter phone number for M-Pesa STK Push");
       const body = {
         type: tenderMode === "CREDIT" ? "INVOICE" : "SALE",
         idempotencyKey: crypto.randomUUID(),
@@ -203,17 +223,6 @@ export function TillPage() {
         setCardRef("");
         setMsg(`Offline: sale saved on this device and will sync automatically.${changeDueCents > 0 ? ` Change due ${formatKes(changeDueCents)}.` : ""}`);
         return;
-      }
-
-      // M-Pesa takes whole shillings; any cents remain on the invoice for another tender.
-      if (tenderMode === "MPESA_STK") {
-        const phone = mpesaPhone.trim();
-        const { paymentId } = await api<{ paymentId: string }>("/payments/stk", {
-          method: "POST",
-          body: JSON.stringify({ documentId: doc.id, phone, amountCents: Math.floor(cartTotalCents / 100) * 100 }),
-        });
-        setMsg(`M-Pesa prompt sent to ${phone}. Waiting for the customer to enter their PIN…`);
-        void pollStk(paymentId, phone);
       }
 
       setLastSale({
@@ -584,7 +593,7 @@ export function TillPage() {
             disabled={!cart.length || isCharging || (tenderMode === "CREDIT" && !selectedCustomer)}
             className="btn-primary w-full py-3.5 text-base font-bold shadow-md"
           >
-            {isCharging ? "Processing Sale…" : `Charge ${formatKes(cartTotalCents)}`}
+            {isCharging ? (tenderMode === "MPESA_STK" ? "Waiting for M-Pesa…" : "Processing Sale…") : `Charge ${formatKes(cartTotalCents)}`}
           </button>
         </div>
       </div>

@@ -133,6 +133,15 @@ export const paymentSettingsSchema = z.object({
   password: z.string().min(3).max(200),
   channelId: z.number().int().positive(),
 });
+/** An M-Pesa prompt from the till, before any sale exists. */
+export const tillPromptSchema = z.object({
+  idempotencyKey: z.string().min(8).max(64),
+  branchId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+  phone: z.string().trim().regex(/^(?:\+?254|0)[17]\d{8}$/, "Invalid phone"),
+  expectedTotalCents: z.number().int().positive(),
+  lines: z.array(docLine).min(1).max(500),
+});
 export const stkPushSchema = z.object({
   documentId: z.string().uuid(),
   phone: z.string().trim().regex(/^(?:\+?254|0)[17]\d{8}$/, "Invalid phone"),

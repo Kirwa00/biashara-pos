@@ -1,4 +1,4 @@
-import { paymentSettingsSchema, stkPushSchema } from "@kpos/shared";
+import { paymentSettingsSchema, stkPushSchema, tillPromptSchema } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -10,6 +10,7 @@ import { audit, withTenant } from "../db";
 import type { AppEnv, Env } from "../env";
 import type postgres from "postgres";
 import { key, promptOutcome, stkPush, toPhone254 } from "../payhero";
+import { settleTillPrompt, startTillPrompt, tillPromptStatus } from "../till-prompts";
 import { applyPayment } from "./documents";
 import { currentShiftId } from "./shifts";
 
@@ -106,6 +107,15 @@ export const paymentRoutes = new Hono<AppEnv>()
     if (!data) throw new HTTPException(502, { message: "PayHero did not accept the request" });
     return c.json({ paymentId: pay.id, status: "PENDING" }, 202);
   })
+  /** From the till: the sale is recorded only once the money is confirmed. */
+  .post("/payments/till-prompts", requirePermission("sales.create"), requirePermission("payments.record"), zValidator("json", tillPromptSchema), async (c) => {
+    const { sub, bid } = c.get("auth");
+    return c.json(await startTillPrompt(c.env, c.get("sql"), { bid, sub }, c.req.valid("json"), new URL(c.req.url).origin), 202);
+  })
+  .get("/payments/till-prompts/:id", async (c) => {
+    if (!/^[0-9a-f-]{36}$/i.test(c.req.param("id"))) throw new HTTPException(404, { message: "Prompt not found" });
+    return c.json(await tillPromptStatus(c.env, c.get("sql"), c.get("auth").bid, c.req.param("id")));
+  })
   .get("/payments/:id", async (c) => {
     const [p] = await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`SELECT id, document_id, method, amount_cents, reference, status, created_at FROM payments WHERE id = ${c.req.param("id")}`);
     if (!p) throw new HTTPException(404, { message: "Payment not found" });
@@ -122,6 +132,7 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
   if (!ref || !/^[0-9a-f-]{36}$/i.test(ref)) return c.json({ ok: true });
   const bid = row.bid as string;
   await settlePrompt(c.env, sql, bid, ref);
+  await settleTillPrompt(c.env, sql, bid, ref);
   // The same account collects BiasharaPOS subscriptions; the id can only match one of the two.
   if ((await sellerBusinessId(c.env, sql)) === bid) await settleSubscriptionPrompt(c.env, sql, bid, ref);
   return c.json({ ok: true });
