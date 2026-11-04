@@ -38,15 +38,19 @@ export async function amountShillings(env: Env, s: postgres.Row, st: TxStatus): 
 }
 
 export const toPhone254 = (p: string) => p.replace(/^\+/, "").replace(/^0/, "254");
+/** PayHero documents phone numbers as 07… or 01…. */
+const toLocalPhone = (p: string) => p.replace(/^\+/, "").replace(/^254/, "0");
 
 /** Sends an M-Pesa prompt from the business's PayHero account; null when PayHero didn't accept it. */
 export async function stkPush(env: Env, s: postgres.Row, p: { amountCents: number; phone: string; reference: string; origin: string }) {
   const res = await fetch(`${base(env)}/api/v2/payments`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: basic(s.payhero_username, await decryptSecret(key(env), s.payhero_password_enc)) },
-    body: JSON.stringify({ amount: p.amountCents / 100, phone_number: toPhone254(p.phone), channel_id: s.channel_id, provider: "m-pesa",
+    body: JSON.stringify({ amount: p.amountCents / 100, phone_number: toLocalPhone(p.phone), channel_id: s.channel_id, provider: "m-pesa",
       external_reference: p.reference, callback_url: `${p.origin}/v1/webhooks/payhero/${s.callback_token}` }),
   }).catch(() => null);
+  // PayHero's reason is the only clue when a prompt is refused; it holds no credentials.
+  if (!res?.ok) console.error(`PayHero refused a prompt: ${res?.status ?? "no response"} ${res ? (await res.text().catch(() => "")).slice(0, 300) : ""}`);
   return res?.ok ? ((await res.json()) as { reference?: string; CheckoutRequestID?: string }) : null;
 }
 

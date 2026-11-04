@@ -49,7 +49,7 @@ describe("prototype flows", () => {
     vi.stubGlobal("fetch", fetchMock);
     const stk = await json<{ paymentId: string }>(post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 100000 }, t));
     const sent = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
-    expect(sent).toMatchObject({ amount: 1000, phone_number: "254712345678", channel_id: 123, external_reference: stk.paymentId });
+    expect(sent).toMatchObject({ amount: 1000, phone_number: "0712345678", channel_id: 123, external_reference: stk.paymentId });
     expect((await post("/v1/payments/stk", { documentId: inv.id, phone: "0712345678", amountCents: 100000 }, t)).status).toBe(422);
 
     const hook = new URL(settings.callbackUrl).pathname;

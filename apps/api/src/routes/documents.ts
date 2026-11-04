@@ -44,22 +44,11 @@ export async function applyPayment(tx: Tx, doc: postgres.Row, amountCents: numbe
 
 type Fixed = { description: string; unit_price_cents: string; tax_code: string; net_cents: string; tax_cents: string; total_cents: string };
 
-/** `fixed` carries saved quotation lines so a converted invoice keeps the quoted prices. */
-export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?: string, fixed?: Fixed[]) {
-  if (body.idempotencyKey) {
-    const [dup] = await tx`SELECT * FROM documents WHERE idempotency_key = ${body.idempotencyKey}`;
-    if (dup) return dup;
-  }
-  if (body.type === "QUOTE" && body.payments.length) throw new HTTPException(422, { message: "Quotations cannot take payments" });
-  if (body.type === "INVOICE" && !body.customerId) throw new HTTPException(422, { message: "Invoices need a customer" });
-  if (body.type === "SALE") await requireOpenShift(tx, ctx.sub);
-  const branchId = await resolveBranch(tx, ctx.sub, body.branchId);
-  const [cust] = body.customerId ? await tx`SELECT * FROM customers WHERE id = ${body.customerId} AND is_active FOR UPDATE` : [];
-  if (body.customerId && !cust) throw new HTTPException(400, { message: "Unknown customer" });
-
-  const ids = [...new Set(body.lines.map((l) => l.productId))];
+/** Prices lines from the catalog for this customer. `fixed` carries saved lines so a converted invoice keeps the quoted prices. */
+export async function priceLines(tx: Tx, input: DocInput["lines"], cust?: postgres.Row, fixed?: Fixed[]) {
+  const ids = [...new Set(input.map((l) => l.productId))];
   const products = new Map((await tx`SELECT * FROM products WHERE ${fixed ? tx`true` : tx`is_active`} AND id IN ${tx(ids)}`).map((p) => [p.id as string, p]));
-  const lines = body.lines.map((l, i) => {
+  return input.map((l, i) => {
     const p = products.get(l.productId);
     if (!p) throw new HTTPException(400, { message: `Unknown product ${l.productId}` });
     const f = fixed?.[i];
@@ -68,6 +57,22 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
       l.quantity, cust?.price_tier ?? "RETAIL");
     return { ...l, p, price, t: computeLine({ unitPriceCents: price, quantity: l.quantity, taxCode: p.tax_code as TaxCode, priceIncludesTax: p.price_includes_tax }) };
   });
+}
+
+/** `paymentAlreadyTaken`: the customer has paid by M-Pesa, so the sale is recorded even if the till shift closed in the meantime. */
+export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?: string, fixed?: Fixed[], opts: { paymentAlreadyTaken?: boolean } = {}) {
+  if (body.idempotencyKey) {
+    const [dup] = await tx`SELECT * FROM documents WHERE idempotency_key = ${body.idempotencyKey}`;
+    if (dup) return dup;
+  }
+  if (body.type === "QUOTE" && body.payments.length) throw new HTTPException(422, { message: "Quotations cannot take payments" });
+  if (body.type === "INVOICE" && !body.customerId) throw new HTTPException(422, { message: "Invoices need a customer" });
+  if (body.type === "SALE" && !opts.paymentAlreadyTaken) await requireOpenShift(tx, ctx.sub);
+  const branchId = await resolveBranch(tx, ctx.sub, body.branchId);
+  const [cust] = body.customerId ? await tx`SELECT * FROM customers WHERE id = ${body.customerId} AND is_active FOR UPDATE` : [];
+  if (body.customerId && !cust) throw new HTTPException(400, { message: "Unknown customer" });
+
+  const lines = await priceLines(tx, body.lines, cust, fixed);
   const total = lines.reduce((s, l) => s + l.t.totalCents, 0);
   if (body.expectedTotalCents !== undefined && body.expectedTotalCents !== total)
     throw new HTTPException(409, { message: `Prices changed since this sale was taken (now ${total / 100}, charged ${body.expectedTotalCents / 100})` });
