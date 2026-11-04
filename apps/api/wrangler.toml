@@ -2,9 +2,11 @@ name = "kenya-pos-api"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
+keep_vars = true # a deploy must not wipe variables set in the dashboard, e.g. SUPER_ADMIN_EMAILS
 
 [vars]
-APP_ORIGIN = "https://kenya-pos-web.emmanuelkirwa8.workers.dev" # set to https://app.<domain> once you have a domain
+APP_ORIGIN = "https://biasharapos.com"
+EMAIL_FROM = "BiasharaPOS <alerts@biasharapos.com>"
 
 # Production: bind Hyperdrive (query caching DISABLED — stock/payments must never read stale rows).
 [[hyperdrive]]
@@ -14,7 +16,7 @@ id = "4064dafca6d14081b9ce778f678de2dc" # kpos-db: Neon biashara-pos (Frankfurt)
 
 # Sprint 8 alerts (UTC). Jobs are idempotent per Nairobi day, so a retried or overlapping run sends nothing twice.
 # 05:00 = 08:00 EAT low stock, overdue, M-Pesa issues, POs, eTIMS issues; 17:00 = 20:00 EAT daily owner summary; */15 eTIMS submission queue.
-# Owner email needs `wrangler secret put RESEND_API_KEY` and EMAIL_FROM (a Resend-verified sender); without them alerts stay in-app.
+# Owner email needs `wrangler secret put RESEND_API_KEY` and biasharapos.com verified in Resend; without the key alerts stay in-app.
 [triggers]
 crons = ["0 5 * * *", "0 17 * * *", "*/15 * * * *"]
 
