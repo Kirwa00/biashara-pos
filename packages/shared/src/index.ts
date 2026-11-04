@@ -5,3 +5,4 @@ export * from "./schemas";
 export * from "./catalog";
 export * from "./stock";
 export * from "./notifications";
+export * from "./billing";

@@ -8,6 +8,7 @@ type Me = {
   user: { name: string; role: string };
   business: { name: string; kra_pin?: string | null };
   isSuperAdmin?: boolean;
+  billing?: { kind: "TRIAL" | "ACTIVE" | "GRACE" | "LAPSED"; endsAt: string; daysLeft: number } | null;
   supportSession?: boolean;
 };
 
@@ -36,6 +37,24 @@ const NAV = [
   { to: "/team", label: "Team & Branches" },
   { to: "/settings/payments", label: "PayHero Settings" },
 ];
+
+/** Quiet until a week before the end, then increasingly plain. Only owners can pay, so everyone else is told who to ask. */
+function BillingBanner({ billing, owner }: { billing: NonNullable<Me["billing"]>; owner: boolean }) {
+  const { kind, daysLeft } = billing;
+  if ((kind === "TRIAL" || kind === "ACTIVE") && daysLeft > 7) return null;
+  const left = `${daysLeft} day${daysLeft === 1 ? "" : "s"}`;
+  const graceLeft = Math.max(3 + daysLeft, 0);
+  const text = kind === "LAPSED" ? "This account is read-only: you can view and export records, but not make sales or changes."
+    : kind === "GRACE" ? `The subscription has ended. The app becomes read-only in ${graceLeft} day${graceLeft === 1 ? "" : "s"}.`
+    : kind === "TRIAL" ? `Free trial: ${left} left.` : `Subscription renews in ${left}.`;
+  const urgent = kind === "LAPSED" || kind === "GRACE";
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-3 px-6 py-2 text-sm ${urgent ? "bg-red-50 text-critical" : "bg-amber-100 text-amber-900"}`}>
+      <span>{text}{owner ? "" : " Ask the business owner to pay."}</span>
+      {owner && <NavLink to="/billing" className="rounded-lg bg-navy px-3 py-1 text-xs font-semibold text-white">Open Billing</NavLink>}
+    </div>
+  );
+}
 
 export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
@@ -93,7 +112,7 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto">
-          {(me?.isSuperAdmin ? [...NAV, { to: "/admin", label: "Platform Admin" }] : NAV).map((n) => (
+          {[...NAV, ...(me?.billing && me.user.role === "OWNER" ? [{ to: "/billing", label: "Billing" }] : []), ...(me?.isSuperAdmin ? [{ to: "/admin", label: "Platform Admin" }] : [])].map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -171,6 +190,7 @@ export function AppShell() {
             <button onClick={() => { support.exit(); window.location.href = "/admin"; }} className="rounded-lg bg-amber-900 px-3 py-1 text-xs font-semibold text-white">Exit support view</button>
           </div>
         )}
+        {me?.billing && <BillingBanner billing={me.billing} owner={me.user.role === "OWNER"} />}
         <main className="flex-1 p-6 overflow-y-auto">
           <Suspense fallback={<Loading />}>
             <Outlet />

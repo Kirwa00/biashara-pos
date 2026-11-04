@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type postgres from "postgres";
 import { z } from "zod";
+import { assertWithinCaps, capsFor } from "../access";
 import { requireAuth, requirePermission } from "../auth";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
@@ -72,8 +73,10 @@ export const catalogRoutes = new Hono<AppEnv>()
   .post("/products", requirePermission("catalog.manage"), zValidator("json", productSchema), async (c) => {
     const { sub, bid } = c.get("auth");
     const body = c.req.valid("json");
+    const caps = await capsFor(c.env, c.get("sql"), bid);
     const product = await withTenant(c.get("sql"), bid, async (tx) => {
       const [p] = await tx`INSERT INTO products ${tx(productRow(body, bid), ...COLS)} RETURNING *`;
+      await assertWithinCaps(tx, caps, "products");
       await replaceUnits(tx, bid, p!.id, body.units);
       await audit(tx, { businessId: bid, userId: sub, action: "product.create", entity: "product", entityId: p!.id, after: body });
       return p;
@@ -107,6 +110,7 @@ export const catalogRoutes = new Hono<AppEnv>()
   /** Body: raw CSV text (sku, name, retail_price required). Upserts by SKU, updating only supplied columns; all-or-nothing, returns per-row errors when any row is invalid. */
   .post("/products/import", requirePermission("catalog.manage"), async (c) => {
     const { sub, bid } = c.get("auth");
+    const caps = await capsFor(c.env, c.get("sql"), bid);
     const rows = parseCsv(await c.req.text());
     if (!rows.length) throw new HTTPException(400, { message: "CSV has no rows" });
     if (rows.length > MAX_IMPORT_ROWS) throw new HTTPException(400, { message: `Max ${MAX_IMPORT_ROWS} rows per import` });
@@ -145,6 +149,7 @@ export const catalogRoutes = new Hono<AppEnv>()
         await tx`INSERT INTO products ${tx(values.slice(i, i + 500), ...COLS)}
           ON CONFLICT (business_id, sku) DO UPDATE SET ${tx.unsafe([...updateSet, "is_active = true", "updated_at = now()"].join(", "))}`;
       }
+      await assertWithinCaps(tx, caps, "products");
       await audit(tx, { businessId: bid, userId: sub, action: "product.import", entity: "product", after: { rows: values.length } });
       return values.length;
     });

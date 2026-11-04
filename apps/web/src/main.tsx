@@ -17,6 +17,7 @@ const TeamPage = page(() => import("./pages/TeamPage"), "TeamPage");
 const InventoryPage = page(() => import("./pages/InventoryPage"), "InventoryPage");
 const InvoicesPage = page(() => import("./pages/InvoicesPage"), "InvoicesPage");
 const PaymentsSettingsPage = page(() => import("./pages/PaymentsSettingsPage"), "PaymentsSettingsPage");
+const BillingPage = page(() => import("./pages/BillingPage"), "BillingPage");
 const ReportsPage = page(() => import("./pages/ReportsPage"), "ReportsPage");
 const PurchaseOrdersPage = page(() => import("./pages/PurchaseOrdersPage"), "PurchaseOrdersPage");
 const SuppliersPage = page(() => import("./pages/SuppliersPage"), "SuppliersPage");
@@ -94,6 +95,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="team" element={<TeamPage />} />
           <Route path="settings/payments" element={<PaymentsSettingsPage />} />
+          <Route path="billing" element={<BillingPage />} />
           <Route path="admin" element={<AdminPage />} />
         </Route>
       </Routes>

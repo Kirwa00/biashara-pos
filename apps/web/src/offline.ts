@@ -32,7 +32,7 @@ let flushing = false;
  * Sends queued sales oldest-first, only while this cashier has an open shift (so takings land in a Z report).
  * Stops on a network/server error; a rejected sale (4xx, e.g. prices changed) stays with its error.
  */
-export async function flushOutbox(): Promise<"ok" | "no-shift" | "offline"> {
+export async function flushOutbox(): Promise<"ok" | "no-shift" | "offline" | "lapsed"> {
   if (flushing || !readOutbox().some((q) => !q.error)) return "ok";
   flushing = true;
   try {
@@ -45,6 +45,8 @@ export async function flushOutbox(): Promise<"ok" | "no-shift" | "offline"> {
         await api("/documents", { method: "POST", body: JSON.stringify(q.body) });
         write(readOutbox().filter((x) => x.key !== q.key));
       } catch (e) {
+        // Not the sale's fault: keep it untouched so it syncs once the subscription is paid.
+        if (e instanceof ApiError && e.status === 402) return "lapsed";
         if (e instanceof ApiError && e.status < 500) {
           write(readOutbox().map((x) => (x.key === q.key ? { ...x, error: e.message } : x)));
           continue;

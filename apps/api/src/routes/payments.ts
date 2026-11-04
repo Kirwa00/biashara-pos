@@ -3,16 +3,16 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
-import { decryptSecret, encryptSecret, randomToken } from "../crypto";
+import { sellerBusinessId } from "../access";
+import { settleSubscriptionPrompt } from "../billing";
+import { encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
 import type { AppEnv, Env } from "../env";
 import type postgres from "postgres";
-import { amountShillings, sameChannel, base, key, payheroGet, type TxStatus } from "../payhero";
+import { key, promptOutcome, stkPush, toPhone254 } from "../payhero";
 import { applyPayment } from "./documents";
 import { currentShiftId } from "./shifts";
 
-const basic = (u: string, p: string) => `Basic ${btoa(`${u}:${p}`)}`;
-const toPhone254 = (p: string) => p.replace(/^\+/, "").replace(/^0/, "254");
 /** A prompt waiting longer than this is re-checked with PayHero before a new prompt may claim its amount. */
 const STK_WAIT = "3 minutes";
 
@@ -28,10 +28,9 @@ async function settlePrompt(env: Env, sql: postgres.Sql, bid: string, paymentId:
   });
   if (!found) return;
   const { pay, s } = found;
-  const st = await payheroGet<TxStatus>(env, s, `/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`);
-  if (!st) return;
-  const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id && sameChannel(s, st.channel_id);
-  const amount = st.status === "SUCCESS" && sameTx && st.provider_reference ? await amountShillings(env, s, st) : undefined;
+  const outcome = await promptOutcome(env, s, { id: pay.id as string, provider_ref: pay.provider_ref as string });
+  if (!outcome) return;
+  const { st, amount } = outcome;
   await withTenant(sql, bid, async (tx) => {
     const [still] = await tx`SELECT id FROM payments WHERE id = ${pay.id} AND status = 'PENDING' FOR UPDATE`;
     if (!still) return; // a concurrent callback already settled it
@@ -100,14 +99,7 @@ export const paymentRoutes = new Hono<AppEnv>()
         VALUES (${bid}, ${doc.id}, 'MPESA', ${b.amountCents}, 'PENDING', ${toPhone254(b.phone)}, ${sub}) RETURNING id`;
       return { pay: pay!, s };
     });
-    const password = await decryptSecret(key(c.env), s.payhero_password_enc);
-    const res = await fetch(`${base(c.env)}/api/v2/payments`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: basic(s.payhero_username, password) },
-      body: JSON.stringify({ amount: b.amountCents / 100, phone_number: toPhone254(b.phone), channel_id: s.channel_id, provider: "m-pesa",
-        external_reference: pay.id, callback_url: `${new URL(c.req.url).origin}/v1/webhooks/payhero/${s.callback_token}` }),
-    }).catch(() => null);
-    const data = res?.ok ? ((await res.json()) as { reference?: string; CheckoutRequestID?: string }) : null;
+    const data = await stkPush(c.env, s, { amountCents: b.amountCents, phone: b.phone, reference: pay.id as string, origin: new URL(c.req.url).origin });
     await withTenant(sql, bid, (tx) => data
       ? tx`UPDATE payments SET provider_ref = ${data.reference ?? data.CheckoutRequestID ?? null} WHERE id = ${pay.id}`
       : tx`UPDATE payments SET status = 'FAILED' WHERE id = ${pay.id}`);
@@ -128,6 +120,9 @@ export const webhookRoutes = new Hono<AppEnv>().post("/payhero/:token", async (c
   const body = (await c.req.json().catch(() => ({}))) as { response?: { ExternalReference?: string } };
   const ref = body.response?.ExternalReference;
   if (!ref || !/^[0-9a-f-]{36}$/i.test(ref)) return c.json({ ok: true });
-  await settlePrompt(c.env, sql, row.bid as string, ref);
+  const bid = row.bid as string;
+  await settlePrompt(c.env, sql, bid, ref);
+  // The same account collects BiasharaPOS subscriptions; the id can only match one of the two.
+  if ((await sellerBusinessId(c.env, sql)) === bid) await settleSubscriptionPrompt(c.env, sql, bid, ref);
   return c.json({ ok: true });
 });

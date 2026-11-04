@@ -1,3 +1,5 @@
+import { adminSubscriptionSchema } from "@kpos/shared";
+import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
@@ -64,6 +66,17 @@ export const adminRoutes = new Hono<AppEnv & { Variables: { adminEmail: string }
     await withTenant(sql, b.id, (tx) => tx`UPDATE businesses SET status = 'ACTIVE' WHERE id = ${b.id}`);
     await logAction(sql, { id: c.get("auth").sub, email: c.get("adminEmail") }, b.id, "reactivate");
     return c.json({ id: b.id, status: "ACTIVE" });
+  })
+  /** For Enterprise deals, bank or cash payments, and free pilots: sets the plan and paid-up date by hand. Any invoice is raised as a normal sale. */
+  .post("/admin/businesses/:id/subscription", zValidator("json", adminSubscriptionSchema), async (c) => {
+    const sql = c.get("sql");
+    const b = await targetBusiness(sql, c.req.param("id"));
+    const body = c.req.valid("json");
+    const paidUntil = new Date(`${body.paidUntil}T23:59:59+03:00`);
+    await withTenant(sql, b.id, (tx) => tx`UPDATE businesses SET plan = ${body.plan}, billing_cycle = ${body.cycle}, paid_until = ${paidUntil}, last_billing_prompt = NULL,
+      status = CASE WHEN status = 'SUSPENDED' THEN status ELSE 'ACTIVE' END WHERE id = ${b.id}`);
+    await logAction(sql, { id: c.get("auth").sub, email: c.get("adminEmail") }, b.id, "subscription.set", body);
+    return c.json({ id: b.id, plan: body.plan, paidUntil });
   })
   /** A 15-minute, read-only access token as the business owner. No refresh token, so it simply ends. */
   .post("/admin/businesses/:id/impersonate", async (c) => {

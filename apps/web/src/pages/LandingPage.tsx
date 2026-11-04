@@ -22,7 +22,7 @@ const features = [
 
 const plans = [
   { name: "Biashara Starter", who: "Single shops, dukas, chemists and neighbourhood supermarkets", price: "3,600", items: ["1 branch, 1 till", "Up to 1,000 products", "Till, shifts, receipts and X/Z reports", "M-Pesa via your PayHero account", "Stock, customers and invoices"], cta: "Start free trial", featured: false },
-  { name: "Commercial Wholesale", who: "Distributors, wholesalers and retail chains", price: "14,800", items: ["Up to 5 branches, unlimited tills", "Up to 50,000 products", "Extra branch KES 3,500 / month", "Suppliers and goods received", "Customer statements, credit limits and overdue alerts", "Profit and VAT reports, CSV export"], cta: "Start free trial", featured: true },
+  { name: "Commercial Wholesale", who: "Distributors, wholesalers and retail chains", price: "14,800", items: ["Up to 5 branches, unlimited tills", "Up to 50,000 products", "Suppliers and goods received", "Customer statements, credit limits and overdue alerts", "Profit and VAT reports, CSV export"], cta: "Start free trial", featured: true },
   { name: "Enterprise", who: "Corporates and chains with more than 5 outlets", price: null, items: ["Unlimited branches", "Onboarding and data import help", "Priority support"], cta: "Start free trial", featured: false },
 ] as const;
 
@@ -107,7 +107,7 @@ export function LandingPage() {
 
       <section id="pricing" className="mx-auto max-w-6xl px-4 py-16">
         <h2 className="font-display text-3xl font-bold">Simple monthly pricing</h2>
-        <p className="mt-2 text-muted">Every plan starts with a 14-day free trial. Prices are per month, billed annually. BiasharaPOS never holds your money: M-Pesa payments go straight to your own PayHero account.</p>
+        <p className="mt-2 text-muted">Every plan starts with a 14-day free trial. Pay monthly, or yearly in one payment, by M-Pesa. BiasharaPOS never holds your money: M-Pesa payments go straight to your own PayHero account.</p>
         <div className="mt-8 grid gap-6 md:grid-cols-3">
           {plans.map((p) => (
             <div key={p.name} className={`flex flex-col rounded-2xl border p-6 ${p.featured ? "border-primary bg-white shadow-lg ring-2 ring-primary/20" : "border-line bg-white"}`}>
@@ -115,7 +115,7 @@ export function LandingPage() {
               <h3 className="font-display text-xl font-bold">{p.name}</h3>
               <p className="mt-1 text-sm text-muted">{p.who}</p>
               <p className="mt-5 font-display text-3xl font-bold">{p.price ? <>KES <span className="num">{p.price}</span><span className="text-base font-medium text-muted"> / month</span></> : "Custom"}</p>
-              {p.price && <p className="text-xs text-muted">billed annually</p>}
+              {p.price && <p className="text-xs text-muted">monthly or yearly</p>}
               <ul className="mt-5 flex-1 space-y-2 text-sm">
                 {p.items.map((i) => <li key={i} className="flex gap-2"><span className="text-primary">✓</span>{i}</li>)}
               </ul>
