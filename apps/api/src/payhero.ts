@@ -37,6 +37,28 @@ export async function amountShillings(env: Env, s: postgres.Row, st: TxStatus): 
   return undefined;
 }
 
+export const toPhone254 = (p: string) => p.replace(/^\+/, "").replace(/^0/, "254");
+
+/** Sends an M-Pesa prompt from the business's PayHero account; null when PayHero didn't accept it. */
+export async function stkPush(env: Env, s: postgres.Row, p: { amountCents: number; phone: string; reference: string; origin: string }) {
+  const res = await fetch(`${base(env)}/api/v2/payments`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: basic(s.payhero_username, await decryptSecret(key(env), s.payhero_password_enc)) },
+    body: JSON.stringify({ amount: p.amountCents / 100, phone_number: toPhone254(p.phone), channel_id: s.channel_id, provider: "m-pesa",
+      external_reference: p.reference, callback_url: `${p.origin}/v1/webhooks/payhero/${s.callback_token}` }),
+  }).catch(() => null);
+  return res?.ok ? ((await res.json()) as { reference?: string; CheckoutRequestID?: string }) : null;
+}
+
+/** What PayHero says happened to a prompt. `amount` is set only for a SUCCESS that is verifiably this transaction. Null when PayHero is unreachable. */
+export async function promptOutcome(env: Env, s: postgres.Row, pay: { id: string; provider_ref: string }) {
+  const st = await payheroGet<TxStatus>(env, s, `/api/v2/transaction-status?reference=${encodeURIComponent(pay.provider_ref)}`);
+  if (!st) return null;
+  const sameTx = (st.reference ?? pay.provider_ref) === pay.provider_ref && (st.external_reference ?? pay.id) === pay.id && sameChannel(s, st.channel_id);
+  const amount = st.status === "SUCCESS" && sameTx && st.provider_reference ? await amountShillings(env, s, st) : undefined;
+  return { st, amount };
+}
+
 type Pay = { method: string; amountCents: number; reference?: string };
 
 /**

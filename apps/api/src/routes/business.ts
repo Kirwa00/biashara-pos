@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requireAuth, requirePermission } from "../auth";
 import { hashPassword } from "../crypto";
+import { assertWithinCaps, capsFor } from "../access";
+import { billingSummary } from "../billing";
 import { audit, withTenant } from "../db";
 import type { AppEnv } from "../env";
 import { isSuperAdmin } from "./admin";
@@ -13,10 +15,11 @@ export const businessRoutes = new Hono<AppEnv>()
   .get("/me", async (c) => {
     const { sub, bid, imp } = c.get("auth");
     const superAdmin = await isSuperAdmin(c.env, c.get("sql"), c.get("auth"));
+    const billing = await billingSummary(c.env, c.get("sql"), bid);
     return withTenant(c.get("sql"), bid, async (tx) => {
       const [user] = await tx`SELECT id, name, email, role, branch_id FROM users WHERE id = ${sub}`;
       const [business] = await tx`SELECT id, name, kra_pin, phone, currency, timezone, status FROM businesses WHERE id = ${bid}`;
-      return c.json({ user, business, isSuperAdmin: superAdmin, supportSession: !!imp });
+      return c.json({ user, business, isSuperAdmin: superAdmin, supportSession: !!imp, billing });
     });
   })
   .get("/branches", async (c) =>
@@ -25,8 +28,10 @@ export const businessRoutes = new Hono<AppEnv>()
   .post("/branches", requirePermission("branches.manage"), zValidator("json", createBranchSchema), async (c) => {
     const { sub, bid } = c.get("auth");
     const body = c.req.valid("json");
+    const caps = await capsFor(c.env, c.get("sql"), bid);
     const branch = await withTenant(c.get("sql"), bid, async (tx) => {
       const [b] = await tx`INSERT INTO branches (business_id, name, code) VALUES (${bid}, ${body.name}, ${body.code.toUpperCase()}) RETURNING id, name, code`;
+      await assertWithinCaps(tx, caps, "branches");
       await audit(tx, { businessId: bid, userId: sub, action: "branch.create", entity: "branch", entityId: b!.id, after: b });
       return b;
     });

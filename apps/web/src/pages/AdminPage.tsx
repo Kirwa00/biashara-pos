@@ -6,6 +6,7 @@ import { Card, Note, useLoad } from "./ui";
 type Business = {
   id: string; name: string; status: string; phone: string | null; kra_pin: string | null; created_at: string;
   owner_email: string | null; owner_name: string | null; users: number; branches: number; documents_30d: number; sales_30d_cents: string; last_activity: string | null;
+  plan: string | null; billing_cycle: string | null; trial_ends_at: string; paid_until: string | null;
 };
 type Action = { id: string; admin_email: string; action: string; business_name: string | null; created_at: string };
 
@@ -25,6 +26,20 @@ export function AdminPage() {
     try {
       await api(`/admin/businesses/${b.id}/${to}`, { method: "POST", body: "{}" });
       setMsg(`${b.name} ${to === "suspend" ? "suspended" : "reactivated"}.`);
+      list.reload(); actions.reload();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+  /** Enterprise deals, bank or cash payments, and free pilots. */
+  const setSubscription = async (b: Business) => {
+    const plan = prompt(`Plan for ${b.name}: STARTER, COMMERCIAL or ENTERPRISE`, b.plan ?? "ENTERPRISE")?.trim().toUpperCase();
+    if (!plan) return;
+    const cycle = prompt("Billing: MONTHLY or ANNUAL", b.billing_cycle ?? "ANNUAL")?.trim().toUpperCase();
+    if (!cycle) return;
+    const paidUntil = prompt("Paid until (YYYY-MM-DD)", (b.paid_until ?? new Date().toISOString()).slice(0, 10))?.trim();
+    if (!paidUntil) return;
+    try {
+      await api(`/admin/businesses/${b.id}/subscription`, { method: "POST", body: JSON.stringify({ plan, cycle, paidUntil }) });
+      setMsg(`${b.name}: ${plan}, paid until ${paidUntil}.`);
       list.reload(); actions.reload();
     } catch (e) { setMsg((e as Error).message); }
   };
@@ -58,12 +73,13 @@ export function AdminPage() {
                 <tr key={b.id} className="border-t border-line">
                   <td className="py-2"><p className="font-medium">{b.name}</p><p className="text-xs text-muted">Joined {day(b.created_at)}{b.kra_pin ? ` · ${b.kra_pin}` : ""}</p></td>
                   <td><p>{b.owner_name ?? "—"}</p><p className="text-xs text-muted">{b.owner_email}</p></td>
-                  <td><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${TONE[b.status]}`}>{b.status}</span></td>
+                  <td><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${TONE[b.status]}`}>{b.status}</span><p className="mt-1 text-xs text-muted">{b.plan ?? "No plan"}, {b.paid_until ? `paid to ${day(b.paid_until)}` : `trial to ${day(b.trial_ends_at)}`}</p></td>
                   <td className="num text-right">{b.users}</td>
                   <td className="num text-right">{formatKes(Number(b.sales_30d_cents))}<p className="text-xs text-muted">{b.documents_30d} docs</p></td>
                   <td className="text-xs">{day(b.last_activity)}</td>
                   <td className="space-x-2 whitespace-nowrap text-right text-xs font-semibold">
                     <button onClick={() => view(b)} className="text-primary hover:underline">View as owner</button>
+                    <button onClick={() => setSubscription(b)} className="text-primary hover:underline">Subscription</button>
                     {b.status === "SUSPENDED"
                       ? <button onClick={() => setStatus(b, "reactivate")} className="text-primary hover:underline">Reactivate</button>
                       : <button onClick={() => setStatus(b, "suspend")} className="text-critical hover:underline">Suspend</button>}

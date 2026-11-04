@@ -50,7 +50,7 @@ export function TillPage() {
   const sync = () =>
     flushOutbox().then((r) => {
       setOutbox(readOutbox());
-      setSyncNote(r === "no-shift" ? "Open a shift to sync these sales." : r === "offline" ? "Still offline; will retry." : "");
+      setSyncNote(r === "no-shift" ? "Open a shift to sync these sales." : r === "offline" ? "Still offline; will retry." : r === "lapsed" ? "These will sync once the subscription is paid." : "");
     });
   useEffect(() => {
     sync();

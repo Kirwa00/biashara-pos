@@ -6,6 +6,7 @@ import { Card, Note, useLoad } from "./ui";
 
 const TONE: Record<Notification["kind"], string> = {
   LOW_STOCK: "bg-amber-50 text-amber-700",
+  BILLING: "bg-amber-50 text-amber-700",
   OVERDUE_INVOICES: "bg-red-50 text-critical",
   PAYMENT_ISSUES: "bg-red-50 text-critical",
   PO_ACTION: "bg-sky-50 text-sky-700",

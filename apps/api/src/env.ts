@@ -29,4 +29,4 @@ export interface AuthClaims {
   imp?: string;
 }
 
-export type AppEnv = { Bindings: Env; Variables: { sql: postgres.Sql; auth: AuthClaims } };
+export type AppEnv = { Bindings: Env; Variables: { sql: postgres.Sql; auth: AuthClaims; accessChecked?: boolean } };

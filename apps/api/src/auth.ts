@@ -2,6 +2,7 @@ import { can, type Permission, type Role } from "@kpos/shared";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { sign, verify } from "hono/jwt";
+import { assertNotLapsed } from "./access";
 import type { AppEnv, AuthClaims } from "./env";
 
 export const ACCESS_TTL_S = 15 * 60;
@@ -11,6 +12,9 @@ export function signAccess(secret: string, user: { id: string; businessId: strin
   const claims: AuthClaims = { sub: user.id, bid: user.businessId, role: user.role, exp: Math.floor(Date.now() / 1000) + ACCESS_TTL_S, ...(imp ? { imp } : {}) };
   return sign({ ...claims }, secret, "HS256");
 }
+
+/** Still allowed when a subscription has lapsed: paying, signing out, closing a shift already open, and dismissing alerts. */
+const OPEN_WHEN_LAPSED = /^\/v1\/(billing|auth|notifications)(\/|$)|^\/v1\/shifts\/[^/]+\/close$/;
 
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const header = c.req.header("authorization");
@@ -22,6 +26,11 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   }
   // Support sessions can look but never change anything.
   if (c.get("auth").imp && (c.req.method !== "GET" || c.req.path.startsWith("/v1/export"))) throw new HTTPException(403, { message: "Read-only support session" });
+  // Every route group runs this middleware, so check once per request.
+  if (c.req.method !== "GET" && !c.get("accessChecked") && !OPEN_WHEN_LAPSED.test(c.req.path)) {
+    await assertNotLapsed(c.env, c.get("sql"), c.get("auth").bid);
+    c.set("accessChecked", true);
+  }
   await next();
 });
 

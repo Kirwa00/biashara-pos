@@ -93,7 +93,27 @@ Everything in the code is built through S10. These are the steps only the owner 
    - suspend or reactivate a business;
    - "View as owner" opens a 15-minute **read-only** support view. It can't change anything or export data, and it's logged in both the platform log and the shop's own audit log.
 
-## 8. Before the first pilot shop
+## 8. Subscriptions (how clients pay you)
+
+Every new business gets a 14-day free trial. Billing is on as soon as a `SUPER_ADMIN_EMAILS` address is registered: that address's business is the **seller**, and it never pays or gets restricted.
+
+1. Sign in as the seller and connect **your own** PayHero account in **PayHero Settings**. Client payments go there.
+2. The plans appear in your **Products & Catalog** the first time a client opens Billing: `PLAN-STARTER-MONTHLY`, `PLAN-STARTER-ANNUAL`, `PLAN-COMMERCIAL-MONTHLY`, `PLAN-COMMERCIAL-ANNUAL`.
+   - **To change a price,** edit the product. Then update the prices on the landing page by hand.
+   - **Check the VAT setting.** They start as VAT 16%, price inclusive. If you aren't VAT-registered, change each to **Non-VAT**, or your reports will show VAT you don't owe.
+3. Each client is a customer in your books, and each confirmed payment is a paid invoice. Nothing is recorded until money is confirmed, so unpaid prompts never reach your reports or KRA.
+
+**What runs automatically (08:00 EAT daily):**
+- Reminders to owners 7, 3 and 1 days before the end, and through the grace period.
+- An M-Pesa prompt on the last day and each grace day, if the owner saved a plan and number. M-Pesa always asks for their PIN.
+- After 3 days of grace the business is read-only: it can sign in, view, export and pay, but not sell or change anything. Queued offline sales are kept and sync after payment. Paying unlocks it within seconds.
+
+**What needs you:**
+- **Enterprise, bank or cash payments, free pilots:** **Platform Admin → Subscription** sets the plan and paid-up date by hand. Raise any invoice yourself as a normal sale.
+- **Refunds:** do them in PayHero, then correct the paid-up date the same way. A credit note doesn't shorten a subscription.
+- **Payments marked "needs checking":** PayHero reported a different amount. Nothing was credited, so check it in PayHero and set the date by hand if it's genuine.
+
+## 9. Before the first pilot shop
 
 - Register the pilot business. Add its team with the right roles; cashiers get the till only.
 - Import products (CSV), opening stock, and customers with credit limits.
