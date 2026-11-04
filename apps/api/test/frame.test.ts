@@ -1,5 +1,7 @@
+import postgres from "postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
+import { withTenant } from "../src/db";
 
 const env = {
   DATABASE_URL: process.env.DATABASE_URL ?? "postgres://kpos_app:app@localhost:5432/kenya_pos",
@@ -110,5 +112,42 @@ describe("frame follow-ups", () => {
     expect((await post(`/v1/shifts/${shift.id}/close`, { countedCashCents: 3000 }, t)).status).toBe(200);
     expect((await post(`/v1/documents/${s.id}/return`, { reason: "Spilled" }, t)).status).toBe(409);
     expect((await post(`/v1/documents/${s.id}/return`, { reason: "Spilled", method: "BANK", reference: "EFT-RF1" }, t)).status).toBe(201);
+  });
+
+  it("re-checks a prompt whose callback was lost: SUCCESS is applied, FAILED released, anything else stays reserved", async () => {
+    const t = await register("lost");
+    const { business } = await json<{ business: { id: string } }>(call("/v1/me", { token: t }));
+    const p = await json<{ id: string }>(post("/v1/products", { sku: "SALT", name: "Salt", retailPriceCents: 5000, trackStock: false }, t));
+    const cust = await json<{ id: string }>(post("/v1/customers", { name: "Duka Lost", creditLimitCents: 1000000 }, t));
+    expect((await send("PUT", "/v1/settings/payments", { username: "ph-user", password: "ph-secret", channelId: 123 }, t)).status).toBe(200);
+    let status: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("transaction-status") ? status : { success: true, reference: "PH-LOST" }))));
+    const invoice = () => json<{ id: string }>(post("/v1/documents", { type: "INVOICE", customerId: cust.id, lines: [{ productId: p.id, quantity: 2 }] }, t));
+    const prompt = (documentId: string) => post("/v1/payments/stk", { documentId, phone: "0712345678", amountCents: 10000 }, t);
+    const sql = postgres(env.DATABASE_URL, { max: 1 });
+    const age = (id: string) => withTenant(sql, business.id, (tx) => tx`UPDATE payments SET created_at = now() - interval '4 minutes' WHERE id = ${id}`);
+    const paymentStatus = async (id: string) => (await json<{ status: string }>(call(`/v1/payments/${id}`, { token: t }))).status;
+    try {
+      const paid = await invoice();
+      const a = await json<{ paymentId: string }>(prompt(paid.id));
+      await age(a.paymentId);
+      status = { status: "SUCCESS", provider_reference: `L${run}`, amount: 100, reference: "PH-LOST" };
+      expect((await prompt(paid.id)).status).toBe(422); // settled by the re-check, so nothing is left to charge
+      expect(await paymentStatus(a.paymentId)).toBe("CONFIRMED");
+      expect(await json(call(`/v1/documents/${paid.id}`, { token: t }))).toMatchObject({ status: "PAID", paid_cents: "10000" });
+
+      const unclear = await invoice();
+      const b = await json<{ paymentId: string }>(prompt(unclear.id));
+      await age(b.paymentId);
+      status = { status: "QUEUED", reference: "PH-LOST" };
+      expect((await prompt(unclear.id)).status).toBe(422);
+      expect(await paymentStatus(b.paymentId)).toBe("PENDING");
+
+      status = { status: "FAILED", reference: "PH-LOST" };
+      expect((await prompt(unclear.id)).status).toBe(202);
+      expect(await paymentStatus(b.paymentId)).toBe("FAILED");
+    } finally {
+      await sql.end();
+    }
   });
 });
