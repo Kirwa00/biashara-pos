@@ -115,7 +115,7 @@ Every new business gets a 14-day free trial. Billing is on as soon as a `SUPER_A
 
 ## 9. Before the first pilot shop
 
-- Register the pilot business. In **Team & Branches**, give each teller a **Cashier / Teller** login: they see only the till, shifts, sales and invoices, and customers. The owner can reset a forgotten password there.
+- Register the pilot business. In **Team & Branches**, add each teller under **Add till login** with a username and 4-digit PIN. They sign in at `/till-login` with the shop code shown there, and see only the till, shifts, sales and invoices, and customers. The owner can reset a PIN there; five wrong tries lock a login for 15 minutes.
 - Import products (CSV), opening stock, and customers with credit limits.
 - Open a shift, make a sale, run the Z-report, and check **Financial Reports** against the drawer.
 - Install the app on the till device: Chrome shows **Install app** in the header, or use "Add to Home screen".

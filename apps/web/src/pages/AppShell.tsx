@@ -99,7 +99,7 @@ export function AppShell() {
     if (support.active()) { support.exit(); window.location.href = "/admin"; return; }
     await api("/auth/logout", { method: "POST" }).catch(() => {});
     session.clear();
-    nav("/login");
+    nav(me?.user.role === "CASHIER" ? "/till-login" : "/login");
   }
 
   return (
