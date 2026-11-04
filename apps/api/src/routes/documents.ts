@@ -104,7 +104,7 @@ export async function createDocument(tx: Tx, ctx: Ctx, body: DocInput, sourceId?
   return doc!;
 }
 
-const canCreate = (type: string) => (type === "SALE" ? "sales.create" : "invoices.manage") as "sales.create" | "invoices.manage";
+const canCreate = (type: string) => (type === "SALE" ? "sales.create" : "documents.create") as "sales.create" | "documents.create";
 
 export const documentRoutes = new Hono<AppEnv>()
   .use(requireAuth)
@@ -120,7 +120,10 @@ export const documentRoutes = new Hono<AppEnv>()
     const [doc] = await tx`SELECT d.*, cu.name AS customer_name, cu.kra_pin AS customer_kra_pin, cu.phone AS customer_phone, src.type AS source_type, src.number AS source_number
       FROM documents d LEFT JOIN customers cu ON cu.id = d.customer_id LEFT JOIN documents src ON src.id = d.source_id WHERE d.id = ${c.req.param("id")}`;
     if (!doc) throw new HTTPException(404, { message: "Document not found" });
-    return { ...doc, lines: await tx`SELECT * FROM document_lines WHERE document_id = ${doc.id} ORDER BY id`, payments: await tx`SELECT * FROM payments WHERE document_id = ${doc.id} ORDER BY created_at` };
+    const lines = await tx`SELECT * FROM document_lines WHERE document_id = ${doc.id} ORDER BY id`;
+    // Cost prices reveal margins: only roles that see the reports get them.
+    const seesCost = can(c.get("auth").role, "reports.view");
+    return { ...doc, lines: seesCost ? lines : lines.map(({ unit_cost_cents: _cost, ...l }) => l), payments: await tx`SELECT * FROM payments WHERE document_id = ${doc.id} ORDER BY created_at` };
   })))
   .post("/documents", zValidator("json", documentSchema), async (c) => {
     const { sub, bid, role } = c.get("auth");
@@ -134,7 +137,7 @@ export const documentRoutes = new Hono<AppEnv>()
     const body = { ...input, payments: await verifyMpesaCodes(c.env, c.get("sql"), bid, input.payments) };
     return c.json(await withTenant(c.get("sql"), bid, (tx) => createDocument(tx, { bid, sub }, body)), 201);
   })
-  .post("/documents/:id/convert", requirePermission("invoices.manage"), async (c) => {
+  .post("/documents/:id/convert", requirePermission("documents.create"), async (c) => {
     const { sub, bid } = c.get("auth");
     return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
       const [q] = await tx`SELECT * FROM documents WHERE id = ${c.req.param("id")} AND type = 'QUOTE' FOR UPDATE`;
