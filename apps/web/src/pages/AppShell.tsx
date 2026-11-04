@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { formatKes } from "@kpos/shared";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { can, formatKes, ROLE_LABELS, type Permission, type Role } from "@kpos/shared";
 import { api, session, support } from "../api";
 import { Loading } from "./ui";
 
@@ -18,24 +18,24 @@ type ShiftSummary = {
   opened_at: string;
 };
 
-const NAV = [
-  { to: "/", label: "Overview" },
-  { to: "/till", label: "POS Till" },
-  { to: "/shifts", label: "Shifts & Cash-Up" },
-  { to: "/sales", label: "Sales & Invoices" },
-  { to: "/returns", label: "Returns & Credit Notes" },
-  { to: "/inventory", label: "Stock & Movements" },
-  { to: "/transfers", label: "Branch Transfers" },
-  { to: "/suppliers", label: "Suppliers & GRNs" },
-  { to: "/purchase-orders", label: "Purchase Orders" },
-  { to: "/reports", label: "Financial Reports" },
-  { to: "/etims", label: "eTIMS Tax Center" },
-  { to: "/products", label: "Products & Catalog" },
-  { to: "/customers", label: "Customers & Debtors" },
-  { to: "/reminders", label: "Payment Reminders" },
-  { to: "/notifications", label: "Notifications" },
-  { to: "/team", label: "Team & Branches" },
-  { to: "/settings/payments", label: "PayHero Settings" },
+const NAV: { to: string; label: string; need: Permission }[] = [
+  { to: "/", label: "Overview", need: "reports.view" },
+  { to: "/till", label: "POS Till", need: "sales.create" },
+  { to: "/shifts", label: "Shifts & Cash-Up", need: "shift.open" },
+  { to: "/sales", label: "Sales & Invoices", need: "documents.create" },
+  { to: "/returns", label: "Returns & Credit Notes", need: "sales.refund" },
+  { to: "/inventory", label: "Stock & Movements", need: "stock.view" },
+  { to: "/transfers", label: "Branch Transfers", need: "stock.view" },
+  { to: "/suppliers", label: "Suppliers & GRNs", need: "stock.view" },
+  { to: "/purchase-orders", label: "Purchase Orders", need: "reports.view" },
+  { to: "/reports", label: "Financial Reports", need: "reports.view" },
+  { to: "/etims", label: "eTIMS Tax Center", need: "reports.view" },
+  { to: "/products", label: "Products & Catalog", need: "catalog.manage" },
+  { to: "/customers", label: "Customers & Debtors", need: "customers.manage" },
+  { to: "/reminders", label: "Payment Reminders", need: "invoices.manage" },
+  { to: "/notifications", label: "Notifications", need: "reports.view" },
+  { to: "/team", label: "Team & Branches", need: "users.manage" },
+  { to: "/settings/payments", label: "PayHero Settings", need: "settings.payments" },
 ];
 
 /** Quiet until a week before the end, then increasingly plain. Only owners can pay, so everyone else is told who to ask. */
@@ -63,6 +63,10 @@ export function AppShell() {
   const [install, setInstall] = useState<{ prompt: () => Promise<void> } | null>(null);
   const nav = useNavigate();
   const { pathname } = useLocation();
+  const canSee = (p: Permission) => !!me && can(me.user.role as Role, p);
+  // Typing a page's address is refused too: send people to the first page they can use.
+  const page = NAV.find((n) => n.to === pathname);
+  const homePage = NAV.find((n) => canSee(n.need))?.to ?? "/till";
 
   // Chrome/Edge/Android offer installation once the PWA criteria are met; we surface it as a header button.
   useEffect(() => {
@@ -112,7 +116,7 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto">
-          {[...NAV, ...(me?.billing && me.user.role === "OWNER" ? [{ to: "/billing", label: "Billing" }] : []), ...(me?.isSuperAdmin ? [{ to: "/admin", label: "Platform Admin" }] : [])].map((n) => (
+          {[...NAV.filter((n) => canSee(n.need)), ...(me?.billing && me.user.role === "OWNER" ? [{ to: "/billing", label: "Billing" }] : []), ...(me?.isSuperAdmin ? [{ to: "/admin", label: "Platform Admin" }] : [])].map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -130,7 +134,7 @@ export function AppShell() {
 
         {/* Sidebar Footer */}
         <div className="mt-4 border-t border-slate-800 pt-4 px-3 text-xs text-slate-400 space-y-1">
-          <NavLink to="/etims" className="hover:text-white">eTIMS status: Tax Center</NavLink>
+          {canSee("reports.view") && <NavLink to="/etims" className="hover:text-white">eTIMS status: Tax Center</NavLink>}
         </div>
       </aside>
 
@@ -141,7 +145,7 @@ export function AppShell() {
             <div>
               <p className="font-display font-bold leading-tight text-ink">{me?.business.name ?? "Biashara"}</p>
               <p className="text-xs text-muted">
-                {me ? `${me.user.name} · ${me.user.role}` : ""}
+                {me ? `${me.user.name} · ${ROLE_LABELS[me.user.role as Role] ?? me.user.role}` : ""}
                 {me?.business.kra_pin ? ` · PIN: ${me.business.kra_pin}` : ""}
               </p>
             </div>
@@ -149,7 +153,7 @@ export function AppShell() {
 
           <div className="flex items-center gap-3">
             {/* Shift Indicator */}
-            <NavLink
+            {canSee("shift.open") && <NavLink
               to="/shifts"
               className={`hidden sm:inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
                 currentShift
@@ -159,7 +163,7 @@ export function AppShell() {
             >
               <span className={`h-2 w-2 rounded-full ${currentShift ? "bg-primary animate-pulse" : "bg-slate-400"}`} />
               {currentShift ? `Till Shift: ${formatKes(currentShift.expected_cash_cents)}` : "No Shift Open"}
-            </NavLink>
+            </NavLink>}
 
             {install && (
               <button onClick={() => install.prompt().finally(() => setInstall(null))} className="hidden sm:inline-flex rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white hover:bg-primary-active transition">
@@ -167,10 +171,10 @@ export function AppShell() {
               </button>
             )}
 
-            <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-ink transition">
+            {canSee("reports.view") && <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-ink transition">
               Alerts
               {unread > 0 && <span className="num absolute -right-1.5 -top-1.5 rounded-full bg-critical px-1.5 text-[10px] font-bold text-white">{unread}</span>}
-            </NavLink>
+            </NavLink>}
 
             {/* Offline / Online indicator */}
             <span className="hidden lg:inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
@@ -193,7 +197,7 @@ export function AppShell() {
         {me?.billing && <BillingBanner billing={me.billing} owner={me.user.role === "OWNER"} />}
         <main className="flex-1 p-6 overflow-y-auto">
           <Suspense fallback={<Loading />}>
-            <Outlet />
+            {me && page && !canSee(page.need) ? <Navigate to={homePage} replace /> : <Outlet />}
           </Suspense>
         </main>
       </div>

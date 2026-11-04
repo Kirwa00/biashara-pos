@@ -17,7 +17,9 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 export const updateUserSchema = z.object({
   role: z.enum(["MANAGER", "ACCOUNTANT", "CASHIER"]).optional(),
   isActive: z.boolean().optional(),
-}).refine((v) => v.role !== undefined || v.isActive !== undefined, "Nothing to change");
+  /** The owner sets a new password for staff who forget theirs. */
+  password: z.string().min(10, "Use at least 10 characters").optional(),
+}).refine((v) => v.role !== undefined || v.isActive !== undefined || v.password !== undefined, "Nothing to change");
 
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export type LoginInput = z.infer<typeof loginSchema>;

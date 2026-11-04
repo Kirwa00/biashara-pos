@@ -1,4 +1,4 @@
-import { csvRowToProduct, parseCsv, productSchema, type ProductInput } from "@kpos/shared";
+import { can, csvRowToProduct, parseCsv, productSchema, type ProductInput } from "@kpos/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -68,7 +68,8 @@ export const catalogRoutes = new Hono<AppEnv>()
               OR EXISTS (SELECT 1 FROM product_units u WHERE u.product_id = p.id AND u.barcode = ${q}))` : tx``}
         ${categoryId ? tx`AND p.category_id = ${categoryId}` : tx``}
       ORDER BY lower(p.name) LIMIT ${limit} OFFSET ${offset}`);
-    return c.json(rows);
+    // Cost prices reveal margins: only roles that see the reports get them.
+    return c.json(can(c.get("auth").role, "reports.view") ? rows : rows.map(({ cost_cents: _cost, ...p }) => p));
   })
   .post("/products", requirePermission("catalog.manage"), zValidator("json", productSchema), async (c) => {
     const { sub, bid } = c.get("auth");
