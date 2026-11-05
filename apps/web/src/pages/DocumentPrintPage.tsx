@@ -49,7 +49,7 @@ export function DocumentPrintPage() {
   );
 
   return (
-    <div className="mx-auto max-w-[210mm] bg-white p-8 text-sm text-ink print:p-0">
+    <div className="mx-auto max-w-[210mm] bg-white p-4 text-sm text-ink sm:p-8 print:p-0">
       <style>{"@page { size: A4; margin: 14mm; }"}</style>
       <div className="mb-6 flex justify-end gap-2 print:hidden">
         <button onClick={() => window.print()} className="btn-primary">Print / Save as PDF</button>
@@ -89,7 +89,7 @@ export function DocumentPrintPage() {
         </dl>
       </section>
 
-      <table className="mt-6 w-full border-collapse text-left">
+      <div className="overflow-x-auto print:overflow-visible"><table className="mt-6 w-full border-collapse text-left">
         <thead>
           <tr className="border-b border-ink text-xs uppercase">
             <th className="py-2">#</th>
@@ -112,10 +112,10 @@ export function DocumentPrintPage() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
       <section className="mt-4 flex justify-between gap-6">
-        <table className="text-xs">
+        <div className="overflow-x-auto print:overflow-visible"><table className="text-xs">
           <thead>
             <tr className="text-muted">
               <th className="pr-4 text-left">VAT code</th>
@@ -132,7 +132,7 @@ export function DocumentPrintPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <dl className="grid w-64 grid-cols-2 gap-y-1 text-right">
           <dt>Net</dt>
           <dd className="num">{kes(d.net_cents)}</dd>

@@ -76,7 +76,7 @@ export function TransfersPage() {
 
       {open && (
         <Card title={`Transfer #${open.number}: ${open.from_branch} → ${open.to_branch}`}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead className="text-left text-xs uppercase text-muted"><tr><th className="py-2">Product</th><th className="text-right">Sent</th><th className="text-right">Received</th></tr></thead>
             <tbody>
               {open.lines.map((l) => (
@@ -89,7 +89,7 @@ export function TransfersPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
           <div className="mt-3 flex justify-end gap-2">
             <button onClick={() => setOpen(null)} className="rounded-lg border border-line px-3 py-2 text-sm">Close</button>
             {open.status === "PENDING" && <button onClick={() => act(open.id, "cancel")} className="rounded-lg border border-line px-3 py-2 text-sm text-critical">Cancel</button>}

@@ -80,7 +80,7 @@ export function TeamPage() {
     <div className="grid gap-6 lg:grid-cols-3">
       <section className="rounded-xl border border-line bg-card p-5 lg:col-span-2">
         <h2 className="mb-4 font-display text-lg font-bold">Team</h2>
-        <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-left text-sm">
           <thead className="text-muted"><tr><th className="py-2">Name</th><th>Signs in with</th><th>Role</th><th className="text-right">Access</th></tr></thead>
           <tbody>{users.map((u) => (
             <tr key={u.id} className={`border-t border-line ${u.is_active ? "" : "opacity-50"}`}>
@@ -97,7 +97,7 @@ export function TeamPage() {
               )}</td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></div>
         <h3 className="mb-2 mt-6 font-display font-bold">Branches</h3>
         <ul className="text-sm">{branches.map((b) => <li key={b.id}>{b.name} <span className="text-muted">({b.code})</span></li>)}</ul>
       </section>

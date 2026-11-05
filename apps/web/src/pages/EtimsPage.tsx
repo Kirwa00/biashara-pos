@@ -141,7 +141,7 @@ export function EtimsPage() {
 
       {[...dead.data, ...failed.data].length > 0 && (
         <Card title="Failed submissions">
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm">
             <thead className="text-xs uppercase text-muted"><tr><th className="py-2">Doc #</th><th>KRA invoice no.</th><th>Status</th><th>Attempts</th><th>Last error</th><th /></tr></thead>
             <tbody className="divide-y divide-line">
               {[...dead.data, ...failed.data].map((x) => (
@@ -155,7 +155,7 @@ export function EtimsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </Card>
       )}
 

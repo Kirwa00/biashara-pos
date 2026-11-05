@@ -18,6 +18,19 @@ type ShiftSummary = {
   opened_at: string;
 };
 
+/** Phone tab bar: the first four of these the user may open, then More for everything else. */
+const TABS: { to: string; label: string; icon: string }[] = [
+  { to: "/", label: "Home", icon: "M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" },
+  { to: "/till", label: "Till", icon: "M4 7h16v13H4zM8 7V4h8v3M8 12h8M8 16h5" },
+  { to: "/sales", label: "Sales", icon: "M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6" },
+  { to: "/inventory", label: "Stock", icon: "M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8" },
+  { to: "/shifts", label: "Shift", icon: "M12 7v5l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+  { to: "/customers", label: "Customers", icon: "M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a8 8 0 0116 0" },
+];
+const Icon = ({ d }: { d: string }) => (
+  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+);
+
 const NAV: { to: string; label: string; need: Permission }[] = [
   { to: "/", label: "Overview", need: "reports.view" },
   { to: "/till", label: "POS Till", need: "sales.create" },
@@ -49,7 +62,7 @@ function BillingBanner({ billing, owner }: { billing: NonNullable<Me["billing"]>
     : kind === "TRIAL" ? `Free trial: ${left} left.` : `Subscription renews in ${left}.`;
   const urgent = kind === "LAPSED" || kind === "GRACE";
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 px-6 py-2 text-sm ${urgent ? "bg-red-50 text-critical" : "bg-amber-100 text-amber-900"}`}>
+    <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2 text-sm md:px-6 ${urgent ? "bg-red-50 text-critical" : "bg-amber-100 text-amber-900"}`}>
       <span>{text}{owner ? "" : " Ask the business owner to pay."}</span>
       {owner && <NavLink to="/billing" className="rounded-lg bg-navy px-3 py-1 text-xs font-semibold text-white">Open Billing</NavLink>}
     </div>
@@ -61,12 +74,20 @@ export function AppShell() {
   const [currentShift, setCurrentShift] = useState<ShiftSummary | null>(null);
   const [unread, setUnread] = useState(0);
   const [install, setInstall] = useState<{ prompt: () => Promise<void> } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const nav = useNavigate();
   const { pathname } = useLocation();
   const canSee = (p: Permission) => !!me && can(me.user.role as Role, p);
   // Typing a page's address is refused too: send people to the first page they can use.
   const page = NAV.find((n) => n.to === pathname);
   const homePage = NAV.find((n) => canSee(n.need))?.to ?? "/till";
+  const links = [...NAV.filter((n) => canSee(n.need)), ...(me?.billing && me.user.role === "OWNER" ? [{ to: "/billing", label: "Billing" }] : []), ...(me?.isSuperAdmin ? [{ to: "/admin", label: "Platform Admin" }] : [])];
+  const tabs = TABS.filter((t) => links.some((l) => l.to === t.to)).slice(0, 4);
+  const linkClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition ${isActive ? "bg-primary text-white shadow-sm" : "hover:bg-white/5 hover:text-white"}`;
+
+  // The menu closes itself when a link is followed.
+  useEffect(() => setMenuOpen(false), [pathname]);
 
   // Chrome/Edge/Android offer installation once the PWA criteria are met; we surface it as a header button.
   useEffect(() => {
@@ -103,7 +124,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex min-h-screen bg-surface">
+    <div className="flex min-h-dvh bg-surface">
       {/* Sidebar Navigation */}
       <aside className="hidden w-64 shrink-0 flex-col bg-navy p-4 text-slate-300 md:flex">
         <div className="mb-6 px-3 flex items-center justify-between">
@@ -116,20 +137,7 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto">
-          {[...NAV.filter((n) => canSee(n.need)), ...(me?.billing && me.user.role === "OWNER" ? [{ to: "/billing", label: "Billing" }] : []), ...(me?.isSuperAdmin ? [{ to: "/admin", label: "Platform Admin" }] : [])].map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.to === "/"}
-              className={({ isActive }) =>
-                `flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                  isActive ? "bg-primary text-white shadow-sm" : "hover:bg-white/5 hover:text-white"
-                }`
-              }
-            >
-              {n.label}
-            </NavLink>
-          ))}
+          {links.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} className={linkClass}>{n.label}</NavLink>)}
         </nav>
 
         {/* Sidebar Footer */}
@@ -140,18 +148,18 @@ export function AppShell() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col min-w-0">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-card px-6">
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="font-display font-bold leading-tight text-ink">{me?.business.name ?? "Biashara"}</p>
-              <p className="text-xs text-muted">
+        <header className="safe-top sticky top-0 z-20 flex shrink-0 items-center justify-between gap-3 border-b border-line bg-card px-4 py-2.5 md:static md:h-16 md:px-6 md:py-0">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="min-w-0">
+              <p className="truncate font-display font-bold leading-tight text-ink">{me?.business.name ?? "Biashara"}</p>
+              <p className="truncate text-xs text-muted">
                 {me ? `${me.user.name} · ${ROLE_LABELS[me.user.role as Role] ?? me.user.role}` : ""}
-                {me?.business.kra_pin ? ` · PIN: ${me.business.kra_pin}` : ""}
+                <span className="hidden md:inline">{me?.business.kra_pin ? ` · PIN: ${me.business.kra_pin}` : ""}</span>
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 md:gap-3">
             {/* Shift Indicator */}
             {canSee("shift.open") && <NavLink
               to="/shifts"
@@ -166,12 +174,12 @@ export function AppShell() {
             </NavLink>}
 
             {install && (
-              <button onClick={() => install.prompt().finally(() => setInstall(null))} className="hidden sm:inline-flex rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white hover:bg-primary-active transition">
+              <button onClick={() => install.prompt().finally(() => setInstall(null))} className="rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-active transition md:py-1">
                 Install app
               </button>
             )}
 
-            {canSee("reports.view") && <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-ink transition">
+            {canSee("reports.view") && <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1.5 text-xs font-medium md:py-1 text-muted hover:bg-surface hover:text-ink transition">
               Alerts
               {unread > 0 && <span className="num absolute -right-1.5 -top-1.5 rounded-full bg-critical px-1.5 text-[10px] font-bold text-white">{unread}</span>}
             </NavLink>}
@@ -182,25 +190,61 @@ export function AppShell() {
               Online
             </span>
 
-            <button onClick={logout} className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-muted hover:bg-surface hover:text-ink transition">
+            <button onClick={logout} className="hidden rounded-lg border border-line md:inline-flex px-3 py-1.5 text-xs font-semibold text-muted hover:bg-surface hover:text-ink transition">
               Sign out
             </button>
           </div>
         </header>
 
         {me?.supportSession && (
-          <div className="flex items-center justify-between gap-3 bg-amber-100 px-6 py-2 text-sm text-amber-900">
+          <div className="flex items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm text-amber-900 md:px-6">
             <span><strong>Support view</strong> of {me.business.name}: read-only, ends after 15 minutes.</span>
             <button onClick={() => { support.exit(); window.location.href = "/admin"; }} className="rounded-lg bg-amber-900 px-3 py-1 text-xs font-semibold text-white">Exit support view</button>
           </div>
         )}
         {me?.billing && <BillingBanner billing={me.billing} owner={me.user.role === "OWNER"} />}
-        <main className="flex-1 p-6 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-6">
           <Suspense fallback={<Loading />}>
             {me && page && !canSee(page.need) ? <Navigate to={homePage} replace /> : <Outlet />}
           </Suspense>
         </main>
       </div>
+
+      {/* Phone navigation: the sidebar is hidden below md. */}
+      <nav aria-label="Main" className="safe-bottom fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-card print:hidden md:hidden">
+        {tabs.map((t) => (
+          <NavLink key={t.to} to={t.to} end={t.to === "/"} className={({ isActive }) => `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${isActive ? "text-primary" : "text-muted"}`}>
+            <Icon d={t.icon} />
+            {t.label}
+          </NavLink>
+        ))}
+        <button onClick={() => setMenuOpen(true)} aria-expanded={menuOpen} className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${menuOpen ? "text-primary" : "text-muted"}`}>
+          <Icon d="M4 7h16M4 12h16M4 17h16" />
+          More
+        </button>
+      </nav>
+
+      {menuOpen && (
+        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+          <button aria-label="Close menu" onClick={() => setMenuOpen(false)} className="absolute inset-0 bg-navy/60" />
+          <div className="safe-top safe-bottom absolute inset-y-0 right-0 flex w-72 max-w-[85vw] flex-col bg-navy p-4 text-slate-300">
+            <div className="mb-3 flex items-center justify-between px-3">
+              <span className="font-display text-lg font-bold text-white">Biashara<span className="text-primary">POS</span></span>
+              <button onClick={() => setMenuOpen(false)} className="rounded-lg px-2 py-1 text-sm font-semibold hover:text-white">Close</button>
+            </div>
+            {canSee("shift.open") && (
+              <NavLink to="/shifts" className="mb-3 flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2.5 text-xs font-medium">
+                <span className={`h-2 w-2 rounded-full ${currentShift ? "bg-primary" : "bg-slate-400"}`} />
+                {currentShift ? `Till Shift: ${formatKes(currentShift.expected_cash_cents)}` : "No Shift Open"}
+              </NavLink>
+            )}
+            <nav className="flex-1 space-y-1 overflow-y-auto">
+              {links.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} className={linkClass}>{n.label}</NavLink>)}
+            </nav>
+            <button onClick={logout} className="mt-3 rounded-lg border border-slate-700 px-3 py-2.5 text-sm font-semibold hover:text-white">Sign out</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

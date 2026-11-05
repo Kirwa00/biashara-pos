@@ -61,8 +61,8 @@ export function ReportsPage() {
   return (
     <div className="space-y-6">
       <div className="flex gap-3">
-        <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} className="input max-w-44" />
-        <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} className="input max-w-44" />
+        <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} className="input min-w-0 max-w-44" />
+        <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} className="input min-w-0 max-w-44" />
       </div>
       <Note msg={r.msg} />
       {s && (<>
@@ -90,12 +90,12 @@ export function ReportsPage() {
           </div>
           <Note msg={breakdown.msg} />
           {breakdown.data.length ? (
-            <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto"><table className="w-full text-left text-sm">
               <thead className="text-muted"><tr><th className="py-1 capitalize">{by}</th><th className="text-right">{by === "product" ? "Qty" : ""}</th><th className="text-right">Sales</th><th className="text-right">Gross profit</th></tr></thead>
               <tbody>{breakdown.data.map((row) => (
                 <tr key={row.key} className="border-t border-line"><td className="py-2">{row.label}</td><td className="num text-right">{by === "product" ? Number(row.quantity) : ""}</td><td className="num text-right">{formatKes(Number(row.total_cents))}</td><td className="num text-right">{formatKes(Number(row.gross_profit_cents))}</td></tr>
               ))}</tbody>
-            </table>
+            </table></div>
           ) : <p className="text-sm text-muted">No sales in this period.</p>}
         </Card>
       </>)}
@@ -126,12 +126,12 @@ export function ReportsPage() {
             {v.categories.map((c) => <span key={c.category} className="rounded-lg bg-surface px-3 py-1 text-sm">{c.category}: <span className="num font-semibold">{formatKes(Number(c.value_cents))}</span></span>)}
           </div>
           {v.products.length ? (
-            <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto"><table className="w-full text-left text-sm">
               <thead className="text-muted"><tr><th className="py-1">Product</th><th>Category</th><th className="text-right">On hand</th><th className="text-right">Avg cost</th><th className="text-right">Value</th></tr></thead>
               <tbody>{v.products.map((p) => (
                 <tr key={p.id} className="border-t border-line"><td className="py-2">{p.name} <span className="text-xs text-muted">{p.sku}</span></td><td>{p.category}</td><td className="num text-right">{Number(p.on_hand)}</td><td className="num text-right">{formatKes(Number(p.avg_cost_cents))}</td><td className="num text-right">{formatKes(Number(p.value_cents))}</td></tr>
               ))}</tbody>
-            </table>
+            </table></div>
           ) : <p className="text-sm text-muted">No stock on hand.</p>}
         </>)}
       </Card>
