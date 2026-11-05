@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { can, formatKes, ROLE_LABELS, type Permission, type Role } from "@kpos/shared";
 import { api, session, support } from "../api";
+import { InstallApp } from "../install";
 import { Loading } from "./ui";
 
 type Me = {
@@ -73,7 +74,6 @@ export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
   const [currentShift, setCurrentShift] = useState<ShiftSummary | null>(null);
   const [unread, setUnread] = useState(0);
-  const [install, setInstall] = useState<{ prompt: () => Promise<void> } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const nav = useNavigate();
   const { pathname } = useLocation();
@@ -88,15 +88,6 @@ export function AppShell() {
 
   // The menu closes itself when a link is followed.
   useEffect(() => setMenuOpen(false), [pathname]);
-
-  // Chrome/Edge/Android offer installation once the PWA criteria are met; we surface it as a header button.
-  useEffect(() => {
-    const offer = (e: Event) => { e.preventDefault(); setInstall(e as unknown as { prompt: () => Promise<void> }); };
-    const done = () => setInstall(null);
-    window.addEventListener("beforeinstallprompt", offer);
-    window.addEventListener("appinstalled", done);
-    return () => { window.removeEventListener("beforeinstallprompt", offer); window.removeEventListener("appinstalled", done); };
-  }, []);
 
   // Cashiers can't see notifications (403); the bell just stays at zero.
   useEffect(() => {
@@ -143,6 +134,7 @@ export function AppShell() {
         {/* Sidebar Footer */}
         <div className="mt-4 border-t border-slate-800 pt-4 px-3 text-xs text-slate-400 space-y-1">
           {canSee("reports.view") && <NavLink to="/etims" className="hover:text-white">eTIMS status: Tax Center</NavLink>}
+          <InstallApp tone="dark" className="pt-2" />
         </div>
       </aside>
 
@@ -172,12 +164,6 @@ export function AppShell() {
               <span className={`h-2 w-2 rounded-full ${currentShift ? "bg-primary animate-pulse" : "bg-slate-400"}`} />
               {currentShift ? `Till Shift: ${formatKes(currentShift.expected_cash_cents)}` : "No Shift Open"}
             </NavLink>}
-
-            {install && (
-              <button onClick={() => install.prompt().finally(() => setInstall(null))} className="rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-active transition md:py-1">
-                Install app
-              </button>
-            )}
 
             {canSee("reports.view") && <NavLink to="/notifications" aria-label={`${unread} unread notifications`} className="relative rounded-full border border-line px-3 py-1.5 text-xs font-medium md:py-1 text-muted hover:bg-surface hover:text-ink transition">
               Alerts
@@ -241,6 +227,7 @@ export function AppShell() {
             <nav className="flex-1 space-y-1 overflow-y-auto">
               {links.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} className={linkClass}>{n.label}</NavLink>)}
             </nav>
+            <InstallApp tone="dark" className="mt-3" />
             <button onClick={logout} className="mt-3 rounded-lg border border-slate-700 px-3 py-2.5 text-sm font-semibold hover:text-white">Sign out</button>
           </div>
         </div>

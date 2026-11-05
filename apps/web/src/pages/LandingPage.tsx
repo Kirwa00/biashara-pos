@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { InstallApp } from "../install";
 
 /** Public marketing page shown at "/" to signed-out visitors. Plans and prices follow the Stitch pricing design; confirm before launch. */
 const questions = [
@@ -62,6 +63,7 @@ export function LandingPage() {
               <Link to="/register" className="btn-primary px-6">Start your 14-day free trial</Link>
               <a href="#pricing" className="inline-flex min-h-12 items-center rounded-lg border border-slate-600 px-6 font-semibold hover:bg-white/5">See pricing</a>
             </div>
+            <InstallApp tone="dark" className="mt-4" />
             <p className="mt-4 text-sm text-slate-400">No card needed. Prices in KES.</p>
           </div>
           <div aria-hidden className="rounded-2xl bg-white p-5 text-ink shadow-2xl">
