@@ -9,7 +9,7 @@ import { encryptSecret, randomToken } from "../crypto";
 import { audit, withTenant } from "../db";
 import type { AppEnv, Env } from "../env";
 import type postgres from "postgres";
-import { key, promptOutcome, stkPush, toPhone254 } from "../payhero";
+import { checkPayHero, checkSavedPayHero, key, promptOutcome, stkPush, toPhone254 } from "../payhero";
 import { settleTillPrompt, startTillPrompt, tillPromptStatus } from "../till-prompts";
 import { applyPayment } from "./documents";
 import { currentShiftId } from "./shifts";
@@ -66,20 +66,31 @@ export const paymentRoutes = new Hono<AppEnv>()
   .get("/settings/payments", requirePermission("settings.payments"), async (c) => {
     const [s] = await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`SELECT payhero_username, channel_id, callback_token, updated_at FROM payment_settings`);
     const origin = new URL(c.req.url).origin;
-    return c.json(s ? { configured: true, username: s.payhero_username, channelId: s.channel_id, callbackUrl: `${origin}/v1/webhooks/payhero/${s.callback_token}`, updatedAt: s.updated_at } : { configured: false });
+    return c.json(s ? { configured: true, username: s.payhero_username || null, channelId: s.channel_id, callbackUrl: `${origin}/v1/webhooks/payhero/${s.callback_token}`, updatedAt: s.updated_at } : { configured: false });
   })
   .put("/settings/payments", requirePermission("settings.payments"), zValidator("json", paymentSettingsSchema), async (c) => {
     const { sub, bid } = c.get("auth");
     const b = c.req.valid("json");
-    const enc = await encryptSecret(key(c.env), b.password);
+    // A pasted token is proven before it replaces working settings. The username/password form is kept only for existing callers.
+    const usesToken = "token" in b;
+    const check = usesToken ? await checkPayHero(c.env, `Basic ${b.token}`, b.channelId) : null;
+    if (check && !check.ok) throw new HTTPException(check.reason === "UNREACHABLE" ? 503 : 422, { message: check.message });
+    const enc = await encryptSecret(key(c.env), usesToken ? b.token : b.password);
+    const username = usesToken ? "" : b.username;
     await withTenant(c.get("sql"), bid, async (tx) => {
       await tx`INSERT INTO payment_settings (business_id, payhero_username, payhero_password_enc, channel_id, callback_token)
-        VALUES (${bid}, ${b.username}, ${enc}, ${b.channelId}, ${randomToken(24)})
+        VALUES (${bid}, ${username}, ${enc}, ${b.channelId}, ${randomToken(24)})
         ON CONFLICT (business_id) DO UPDATE SET payhero_username = EXCLUDED.payhero_username, payhero_password_enc = EXCLUDED.payhero_password_enc,
           channel_id = EXCLUDED.channel_id, updated_at = now()`;
-      await audit(tx, { businessId: bid, userId: sub, action: "settings.payments.update", entity: "payment_settings", after: { username: b.username, channelId: b.channelId } });
+      await audit(tx, { businessId: bid, userId: sub, action: "settings.payments.update", entity: "payment_settings", after: { auth: usesToken ? "token" : "username", channelId: b.channelId } });
     });
-    return c.json({ configured: true });
+    return c.json(check?.ok ? { configured: true, verified: true, channel: check.channel, walletBalanceCents: check.walletBalanceCents } : { configured: true, verified: false });
+  })
+  /** Test connection: read-only, sends no payment. */
+  .post("/settings/payments/test", requirePermission("settings.payments"), async (c) => {
+    const [s] = await withTenant(c.get("sql"), c.get("auth").bid, (tx) => tx`SELECT * FROM payment_settings`);
+    if (!s) throw new HTTPException(409, { message: "PayHero is not set up for this business" });
+    return c.json(await checkSavedPayHero(c.env, s));
   })
   .post("/payments/stk", requirePermission("payments.record"), zValidator("json", stkPushSchema), async (c) => {
     const { sub, bid } = c.get("auth");

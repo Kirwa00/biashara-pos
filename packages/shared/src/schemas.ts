@@ -128,11 +128,13 @@ export const purchaseSchema = z.object({
   supplierRef: z.string().trim().max(60).optional(),
   lines: z.array(z.object({ productId: z.string().uuid(), quantity: stockQty.refine((n) => n > 0, "Must be positive"), unitCostCents: cents })).min(1).max(500),
 });
-export const paymentSettingsSchema = z.object({
-  username: z.string().trim().min(3).max(120),
-  password: z.string().min(3).max(200),
-  channelId: z.number().int().positive(),
-});
+/** PayHero dashboard > API Keys > Basic Authorization token; a pasted "Basic " prefix is dropped. */
+const payheroToken = z.string().trim().transform((t) => t.replace(/^basic\s+/i, "").trim())
+  .pipe(z.string().min(8, "That token looks too short").max(500).regex(/^[A-Za-z0-9+/_=-]+$/, "Paste only the Basic Authorization token from PayHero's API Keys page"));
+export const paymentSettingsSchema = z.union([
+  z.object({ token: payheroToken, channelId: z.number().int().positive() }),
+  z.object({ username: z.string().trim().min(3).max(120), password: z.string().min(3).max(200), channelId: z.number().int().positive() }),
+]);
 /** An M-Pesa prompt from the till, before any sale exists. */
 export const tillPromptSchema = z.object({
   idempotencyKey: z.string().min(8).max(64),
