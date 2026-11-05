@@ -43,6 +43,10 @@ export function TillPage() {
   const products = useLoad<Product[]>(`/products?limit=500${search ? `&q=${encodeURIComponent(search)}` : ""}`, [], search ? undefined : cacheKey("products"));
   const customers = useLoad<Customer[]>("/customers", [], cacheKey("customers"));
   const shift = useLoad<Shift | null>("/shifts/current", null, cashierCacheKey("shift"));
+  // A warning only: the count can be out of date, especially offline, so the server stays the one that refuses.
+  const stock = useLoad<{ enforced: boolean; items: { product_id: string; on_hand: string }[] } | null>("/till/stock", null, cashierCacheKey("stock"));
+  const onHand = new Map(stock.data?.items.map((i) => [i.product_id, Number(i.on_hand)]));
+  const shortOf = (l: CartLine) => { const have = onHand.get(l.product.id); return have !== undefined && l.quantity > have ? have : null; };
 
   // Offline outbox: retry on mount, when the browser comes back online, and every 20s.
   const [outbox, setOutbox] = useState(readOutbox);
@@ -69,6 +73,7 @@ export function TillPage() {
         setLastSale({ id: p.document_id!, number: p.number!, total_cents: p.total_cents!, change_cents: 0 });
         setCart([]);
         shift.reload();
+        stock.reload();
         return;
       }
       if (p?.status === "FAILED") { setMsg(`M-Pesa prompt to ${phone} failed or was cancelled. No money was taken and no sale was recorded: try again or take another payment method.`); return; }
@@ -238,6 +243,7 @@ export function TillPage() {
       setMpesaCode("");
       setCardRef("");
       shift.reload();
+      stock.reload();
     } catch (err) {
       setMsg((err as Error).message);
     } finally {
@@ -325,6 +331,7 @@ export function TillPage() {
             {products.data.map((p) => {
               const inCart = cart.find((item) => item.product.id === p.id);
               const price = Number(p.retail_price_cents);
+              const have = onHand.get(p.id);
               return (
                 <button
                   key={p.id}
@@ -343,6 +350,7 @@ export function TillPage() {
                     <h3 className="line-clamp-2 mt-0.5 text-sm font-semibold text-ink leading-tight">
                       {p.name}
                     </h3>
+                    {have !== undefined && have <= 0 && <span className="mt-1 inline-block rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-bold text-critical">Out of stock</span>}
                   </div>
                   <div className="mt-3 flex items-baseline justify-between">
                     <span className="num font-display text-base font-bold text-ink">
@@ -419,6 +427,11 @@ export function TillPage() {
                   </div>
                   <span className="num font-semibold text-sm text-ink">{formatKes(totals.totalCents)}</span>
                 </div>
+                {shortOf(line) !== null && (
+                  <p className="mt-1 text-xs font-semibold text-critical">
+                    {shortOf(line)! <= 0 ? "Out of stock" : `Only ${shortOf(line)} in stock`}{stock.data?.enforced ? ": this sale will be refused. Remove it or add stock first." : "."}
+                  </p>
+                )}
 
                 <div className="mt-2 flex items-center justify-between">
                   <div className="flex items-center rounded-lg border border-line bg-surface">
@@ -595,6 +608,11 @@ export function TillPage() {
 
           {/* Beside the button: on a phone anything higher up is off-screen when Charge is tapped. */}
           <div role="status" aria-live="polite"><Note msg={msg} /></div>
+          {stock.data?.enforced && cart.some((l) => shortOf(l) !== null) && (
+            <p className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-critical">
+              Not enough stock for: {cart.filter((l) => shortOf(l) !== null).map((l) => l.product.name).join(", ")}. Remove it or add stock under Stock &amp; Movements, or this sale will be refused.
+            </p>
+          )}
 
           {/* Complete Charge Button */}
           <button

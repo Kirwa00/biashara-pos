@@ -53,6 +53,19 @@ function assertUniqueProducts(lines: { productId: string }[]) {
 
 export const stockRoutes = new Hono<AppEnv>()
   .use(requireAuth)
+  /** What the till warns from: on-hand for tracked products in the user's branch. Tellers have no stock.view; a refused sale already tells them these numbers. */
+  .get("/till/stock", requirePermission("sales.create"), async (c) => {
+    const { sub, bid } = c.get("auth");
+    return c.json(await withTenant(c.get("sql"), bid, async (tx) => {
+      const branchId = await resolveBranch(tx, sub);
+      const [biz] = await tx`SELECT allow_negative_stock FROM businesses WHERE id = ${bid}`;
+      return {
+        enforced: !biz?.allow_negative_stock,
+        items: await tx`SELECT p.id AS product_id, coalesce(b.on_hand, 0) AS on_hand FROM products p
+          LEFT JOIN stock_balances b ON b.product_id = p.id AND b.branch_id = ${branchId} WHERE p.is_active AND p.track_stock`,
+      };
+    }));
+  })
   .get("/stock", requirePermission("stock.view"), async (c) => {
     const { sub, bid } = c.get("auth");
     const lowOnly = c.req.query("low") === "1";
