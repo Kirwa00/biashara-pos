@@ -65,7 +65,11 @@ export const app = new Hono<AppEnv>()
   .route("/v1", billingRoutes);
 
 app.onError((err, c) => {
-  if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
+  if (err instanceof HTTPException) {
+    // Why a payment was refused is the first question when a customer gets no prompt.
+    if (c.req.path.startsWith("/v1/payments") && err.status < 500) console.warn(`Refused ${c.req.path}: ${err.status} ${err.message}`);
+    return c.json({ error: err.message }, err.status);
+  }
   const code = (err as { code?: string }).code;
   if (code === "23505") return c.json({ error: "Already exists" }, 409);
   if (code === "23503") return c.json({ error: "Invalid reference" }, 400);

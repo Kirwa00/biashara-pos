@@ -457,8 +457,6 @@ export function TillPage() {
 
         {/* Cart Totals & Checkout Tenders */}
         <div className="border-t border-line bg-surface/30 p-4 space-y-4">
-          <Note msg={msg} />
-
           {/* Last Sale Confirmation Banner */}
           {lastSale && (
             <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm">
@@ -594,6 +592,9 @@ export function TillPage() {
               )}
             </div>
           )}
+
+          {/* Beside the button: on a phone anything higher up is off-screen when Charge is tapped. */}
+          <div role="status" aria-live="polite"><Note msg={msg} /></div>
 
           {/* Complete Charge Button */}
           <button
