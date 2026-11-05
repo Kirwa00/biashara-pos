@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { InstallApp } from "../install";
 import { api, session } from "../api";
 
 const SHOP_CODE_KEY = "kpos.shopCode";
@@ -66,6 +67,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" | "till" }) {
           <p className="text-center text-sm text-muted">
             {isTill ? <>Not a teller? <Link className="text-primary" to="/login">Sign in with email</Link></> : isLogin ? <>Teller? <Link className="text-primary" to="/till-login">Sign in with your PIN</Link> · New here? <Link className="text-primary" to="/register">Create a business</Link></> : <>Have an account? <Link className="text-primary" to="/login">Sign in</Link></>}
           </p>
+          <InstallApp className="mt-5 text-center" />
         </form>
       </main>
     </div>

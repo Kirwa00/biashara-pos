@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import { session } from "./api";
+import "./install";
 import { Loading } from "./pages/ui";
 
 /** Pages load on first visit so a till on a slow line downloads only what it opens; the service worker keeps them afterwards. */
