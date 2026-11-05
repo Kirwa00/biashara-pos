@@ -19,3 +19,9 @@
 .num { font-variant-numeric: tabular-nums lining-nums; }
 .btn-primary { @apply inline-flex min-h-12 items-center justify-center rounded-lg px-4 font-semibold transition bg-primary text-white hover:bg-primary-active disabled:opacity-50; }
 .input { @apply min-h-12 w-full rounded-lg border border-line bg-white px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20; }
+
+/* Phones: room for notches and home bars when installed; 16px fields stop iOS zooming in on focus. */
+.safe-top { padding-top: max(0.625rem, env(safe-area-inset-top)); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+@media (min-width: 48rem) { header.safe-top { padding-top: 0; } }
+@media (max-width: 47.99rem) { input, select, textarea { font-size: 16px; } }

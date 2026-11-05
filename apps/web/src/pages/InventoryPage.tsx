@@ -16,14 +16,14 @@ export function InventoryPage() {
     <div className="grid gap-6 xl:grid-cols-3">
       <Card title="Stock on hand" className="xl:col-span-2">
         <Note msg={stock.msg} />
-        <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-left text-sm">
           <thead className="text-muted"><tr><th className="py-2">SKU</th><th>Product</th><th className="text-right">On hand</th><th className="text-right">Reorder at</th><th /></tr></thead>
           <tbody>{stock.data.map((r) => (
             <tr key={r.product_id} className="border-t border-line">
               <td className="py-3">{r.sku}</td><td>{r.name}</td><td className="num text-right">{Number(r.on_hand)}</td><td className="text-right">{Number(r.reorder_level)}</td>
               <td className="text-right">{r.low_stock && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Low</span>}</td>
             </tr>))}</tbody>
-        </table>
+        </table></div>
         {adjs.data.length > 0 && <h3 className="mt-6 mb-2 font-bold">Pending adjustments</h3>}
         {adjs.data.map((a) => (
           <div key={a.id} className="flex items-center gap-3 border-t border-line py-2 text-sm">

@@ -246,7 +246,7 @@ export function TillPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 xl:flex-row min-h-[calc(100vh-8rem)]">
+    <div className="flex flex-col gap-6 pb-16 md:pb-0 xl:flex-row min-h-[calc(100vh-8rem)]">
       {/* LEFT CANVAS: Products Catalog & Fast Scanner (60%) */}
       <div className="flex flex-1 flex-col space-y-4 min-w-0">
         {/* Active Shift Bar */}
@@ -364,8 +364,16 @@ export function TillPage() {
         </div>
       </div>
 
+      {/* On phones the cart sits under the product list: keep the total and a way down to it in reach. */}
+      {cart.length > 0 && (
+        <a href="#till-checkout" className="fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 flex items-center justify-between rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white shadow-lg print:hidden md:hidden">
+          <span>{cart.length} item{cart.length === 1 ? "" : "s"} · <span className="num">{formatKes(cartTotalCents)}</span></span>
+          <span>Checkout ↓</span>
+        </a>
+      )}
+
       {/* RIGHT PANEL: Fixed Cart Slip & Checkout Dock (40% - min 380px) */}
-      <div className="w-full xl:w-[420px] shrink-0 flex flex-col rounded-2xl border border-line bg-card shadow-sm overflow-hidden">
+      <div id="till-checkout" className="scroll-mt-20 w-full xl:w-[420px] shrink-0 flex flex-col rounded-2xl border border-line bg-card shadow-sm overflow-hidden">
         {/* Customer Selector Header */}
         <div className="border-b border-line bg-surface/50 p-4">
           <div className="flex items-center justify-between mb-1.5">
